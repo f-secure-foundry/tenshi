@@ -1,0 +1,84 @@
+tenshi -- Frequently Asked Questions
+http://www.inversepath.com/tenshi_faq.html
+
+
+- Why don't you use File::Tail ?
+
+File::Tail has serious performance and synchronization issues, if you use it
+for high performance log analysis things will go terribly wrong. Trust us on
+that.
+
+- How's tenshi different from other tools like swatch, logwatch, logsentry,
+  sec, etc, etc... ?
+
+Quoting http://marc.info/?l=loganalysis&m=113657727325755&w=2
+
+There are no definitive points against one or other apps for most people,
+sometimes you just have to "feel" what works for you.
+
+Anyway the biggest difference from logcheck/logsentry (besides tenshi being
+actively maintained) is flexibility, tenshi is much more powerful in how the
+reports should be assigned/constructed, and the whole concept of queues and
+timing of the different queue checks that logsentry lacks. We also like to
+think that tenshi is cleaner implementation/documentation and packaging wise
+;). Tenshi also runs as a daemon btw and it's not driven by crontab.
+
+Also we are really tired of pointing out that we are not like swatch!  Since
+tenshi came out everyone was asking why are we doing this since swatch is out
+there. Again swatch has no concept of queues and we don't provide an exec
+target at the moment along with no interactive things like the "beep" action.
+Tenshi's main point is summarization (along with instant notifications) and
+that's something swatch can't do (like logsentry). We don't have throttling btw
+(while swatch has something for that), but it wasn't an immediate need since
+summarization is what we rely on. I think that with thresholding you can have
+swatch doing something similar to tenshi but still tenshi should provide a
+better/easier implementation for these kind of things.  Swatch seems
+over-complicated to us.
+
+Logwatch values its default set of rules, we don't have such thing and we ask
+users to understand and feed their own rules, and let's say that we find
+logwatch messy and overly complicated for what it has to do.
+
+Our main objective was providing something powerful and actually useful without
+overcomplicating configuration and the code, performance was also a main issue
+for us along with a clean distribution/packaging.
+
+- How do I use the CSV output feature?
+
+This is an example for graphing tenshi output using AfterGlow
+(http://afterglow.sf.net) and GraphViz (http://www.graphviz.org):
+
+Use something like this in your tenshi configuration:
+
+set csv [0 * * * *] /usr/local/bin/tenshi_graph.sh
+
+Where tenshi_graph.sh could be:
+
+#!/bin/sh
+/usr/local/bin/afterglow.pl -c /etc/afterglow.conf -t | neato -v -Tpng -o /var/lib/tenshi/tenshi_graph.png
+
+and afterglow.conf configuration could be something like:
+
+color.source="green";
+color.target="red"       if ($fields[2] > 1000);
+color.target="orange"    if ($fields[2] > 500);
+color.target="blue"      if ($fields[2] > 100);
+color.target="lightblue" if ($fields[2] > 50);
+color.target="yellow"    if ($fields[2] == 1);
+color.target="white";
+
+This allows having target node colours depending on the number of hits of the
+affected log, but of course it might be whatever conditions you want.
+
+The configuration results in the example screenshot available at
+http://dev.inversepath.com/tenshi/tenshi_afterglow.gif . You can see how it's
+possible to quickly evaluate logs that are common to different servers and
+their frequency.
+
+Keep in mind that in order to have useful and readable graphs your tenshi
+configuration must be accordingly tuned. Arbitrary logs in the csv queue would
+quickly generate huge and unreadable node maps.
+
+This is just an example, more advanced processing can be done. Please share new
+and useful ways for visualizing logs with <tenshi-user@lists.inversepath.com>
+mailing list and/or the SecViz (http://secviz.org) portal.

@@ -1,0 +1,190 @@
+- throttle monitoring loop on empty reads
+- added options for listening on Redis queues (redisqueue, redisserver)
+        Mark Janssen <mark@sig-io.nl>
+
+0.15                                                    (20140804)
+
+- added mailhelo option for friendlier SMTP connections
+        Christian Zuckschwerdt <christian@zuckschwerdt.org>
+- add missing dataend just before quitting the SMTP connection
+        Florian Pritz <bluewind@xinu.at>
+- fix stderr leak
+        Brian De Wolf <bldewolf@csupomona.edu>
+- fix erroneous 'no readable log files' error when in listen mode
+        Bethany Long <Bethany.Long@wwu.edu>
+
+0.14                                                    (20120603)
+
+- cleaned up tail invocation code, fixed repeat handling, gentoo init script update
+        Brian De Wolf <bldewolf@csupomona.edu>
+
+0.13                                                    (20110713)
+
+- added threshold feature for discarding logs with count below specified value
+- fixed broken queue flushing on exit
+- delay daemonization to catch start up errors
+- make sure terminal colour is always reset
+- improved clean up on exit
+        all changes in this release thanks to Brian De Wolf <bldewolf@csupomona.edu>
+
+0.12                                                    (20100917)
+
+- open FIFO in rw mode, fixes bug that causes CPU spinning and processing interruption
+        Michael Braun <michael-devel@fami-braun.de>
+- redhat rpm spec fixes + opensuse rpm spec and init script
+        Heinrich Terhardt <Heinrich.Terhardt@simcon-mt.com>
+
+0.11                                                    (20090719)
+
+- change process name to tenshi when in daemon mode
+- timezone is no longer cached, preventing incorrect timestamps on DST change
+- allow leftmost queue escalation, warn on unreadable log files instead of exiting
+        Heath Caldwell <hncaldwell@csupomona.edu>
+- added resolve option
+        Brian De Wolf <bldewolf@csupomona.edu>
+
+0.10                                                    (20080313)
+
+- includedir now skips dotfiles
+- pid file is now created in debug, profile and foreground modes
+- fixed incorrect uid check not handling root user
+- fixed buggy time_to_die
+- fixed buggy tail_multiple option parsing
+- fixed empty report sending if filter program returns no output
+- fixed bug on unmatched subpatterns
+        Adam James <atj@pulsewidth.org.uk>
+- die before pipe if tail_file is not readable, prevents fd leak
+- replaced IO::Select with IO::BufferedSelect, fixes parsing delay of buffered lines
+
+0.9.1                                                   (20071004)
+
+- improved debug messages
+- moved CHLD signal handler earlier in the code
+- fixed buggy multiple tail processes handling
+        Paul B. Henson <henson@csupomona.edu>
+
+0.9                                                     (20070919)
+
+- added tail_multiple option
+- added csv option for comma separated output to custom parser
+- merged tailargs and filterargs features in tail, filter ones
+- added FAQ file
+- another round of rpm spec fixes + fd leak fix
+        Elan Ruusamäe <glen@delfi.ee>
+
+0.8                                                     (20070819)
+
+- fixed some rpm spec issues
+- added support for queue escalation
+        Heath Caldwell <hncaldwell@csupomona.edu>
+
+0.7                                                     (20070314)
+
+- fifo option can be specified multiple times
+- logfile and fifo mode can be simultaneous
+- better pipe opening method for the tail process
+        Paul B. Henson <henson@csupomona.edu>
+- includedir now sorts entries alphabetically
+        Andreas Niederl <rico32@gmx.net>
+- stdin is now closed as soon as possible
+- replaced alarm based timeout with IO::Select
+- minor fix of getpwnam checks
+- added sort_order option
+- added listen option for syslog server mode
+        Daniele Cortesi <dan@linux.it>
+- added RedHat init file and rpm spec from
+        Steven McCoy <steven@indigorobot.com>
+
+0.6                                                     (20060928)
+
+- added group_host feature for selective hostname matching
+
+0.5.1                                                   (20060618)
+
+- fixed buggy noprefix queue implementation
+
+0.5                                                     (20060609)
+
+- improved sanity checks
+- added debug levels, level 2 enables Net::SMTP debug messages
+- replaced Getopt::Std with Getopt::Long
+- filter feature is now per queue definable
+- added special noprefix queue for unprefixed logs
+- added supplementary groups clearing when dropping privileges
+- moved to ISC-style license
+
+0.4                                                     (20060104)
+
+- added uid, gid options for setting effective UID, GID
+- added colourization of debug messages
+- added filter, filterargs options for report pre-processing
+- added [pager:]<mail_to> syntax for sending pager friendly reports
+- added mailtimeout option
+- fixed tail, tailargs incorrectly being treated as dynamic options
+
+0.3.4                                                   (20060616)
+
+- added include, includedir options for parsing external configuration files
+- added multiple queues feature
+- fixed missing USR1 signal handler
+- added filetest pragma for proper perms check when using POSIX ACL
+- added debian init file
+
+0.3.3                                                   (20050318)
+
+- fixed whitespaces only lines handling in configuration file
+- added configuration check mode and checkconfig target in init scripts
+
+0.3.2                                                   (20041109)
+
+- added X-tenshi-version, X-tenshi-hostname, X-tenshi-report-start headers
+- fixed orphan tail process problem, filehandle is now closed on shutdown
+- fixed bug in cron specs handling
+- LC_TIME locale is internally set to "C" now for compliant Date header
+- mail address specification allows local part only
+- added foreground mode
+
+0.3.1                                                   (20040721)
+
+- added tailargs option
+- fixed buggy logprefix implementation
+- fixed buggy cron */skip implementation
+- fixed broken cron specs examples
+
+0.3                                                     (20040715)
+
+- changed name due to trademark issues
+- added skip groups to speed parsing
+- added cron-style specs instead of time periods
+- added ability to send to multiple recipients, suggested by
+        Marc Doumayrou <doud@rhoas.net>
+- added solaris init file from Marc Doumayrou <doud@rhoas.net>
+- added logprefix option to handle non-syslog logs
+- added status messages
+- added log files perms check
+- fixed strftime portability issue
+        Andrew Eason <andrew@armstrong.edu>
+
+0.2.1                                                   (20040622)
+
+- fixed missing headers in smtp code
+- added hidepid feature
+- replaced expand_repeats with builtin repeat queue
+
+0.2                                                     (20040621)
+
+- added multiple file support
+- big performance improvements: BerkeleyDB and Storable are no longer required
+- better signal handling including configuration reload, see tenshi.8 SIGNALS section
+- replaced mda option with mailserver, now reports are handled by Net::SMTP
+- added per-queue report subjects
+- added expand_repeats option to handle "last message repeated x times" nicely
+- added profiling mode
+- mask option without argument now allows an empty mask
+- pidfile is removed on shutdown
+- die if our child process dies
+- removed prescan option
+
+0.1                                                     (20040604)
+
+- first public release

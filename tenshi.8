@@ -1,0 +1,602 @@
+.\" SH section heading
+.\" SS subsection heading
+.\" LP paragraph
+.\" IP indented paragraph
+.\" TP hanging label
+.TH "tenshi" 8 "04 Aug 2014" "version 0.15"
+.SH NAME
+tenshi - Log Monitoring and Reporting tool
+.SH SYNOPSIS
+.B tenshi
+.B [ -c
+.I <conf file>
+.B ]
+.B [ -C ]
+.B [ -d <debug level> ]
+.B [ -f ]
+.B [ -h ]
+.B [ -p ]
+.B [ -P <pid file> ]
+
+.SH DESCRIPTION
+.LP
+
+tenshi is a log monitoring program, designed to watch one or more log files for
+lines matching user defined regular expressions and report on the matches. The
+regular expressions are assigned to queues which have an alert interval and a
+list of mail recipients.
+
+Queues can be set to send a notification as soon as there is a log line
+assigned to it, or to send periodic reports.
+
+Additionally, uninteresting fields in the log lines (such as PID numbers) can
+be masked with the standard regular expression grouping operators ( ). This
+allows cleaner and more readable reports. All reports are separated by hostname
+and all messages are condensed when possible.
+
+The program reads a configuration file
+.RI ( tenshi.conf )
+and then forks a deamon for monitoring the specified log files.
+
+.SH OPTIONS
+.SS
+.TP
+.I -c <conf file>
+Read configuration from file. The default file is /etc/tenshi/tenshi.conf .
+.TP
+.I -C
+Perform a syntax check of the configuration file. The program exits after
+parsing the configuration with either a return code of 0 or an error.
+.TP
+.I -d <debug level>
+Enable debug messages. Default level is 1 if none is specified, level 2 enables
+SMTP connection debug messages. In this mode the main process remains in the
+foreground.
+.TP
+.I -f
+Enable foreground mode. In this mode the main process operates normally but
+remains in the foreground, this is needed for some process supervisors.
+.TP
+.I -p
+Enable profiling mode. In this mode the main process remains in the foreground
+and expects log lines to be fed to standard in. When it receives an EOF it will
+stop processing. No alerts will be sent in this mode, it is used solely for
+measuring tenshi's line processing speed. For example:
+time $(cat /var/log/messages|tenshi -p > /dev/null)
+.TP
+.I -P <pid file>
+Define the file containing the PID of the process, this overrides any 'pidfile'
+option present in the configuration file.
+
+.SH CONFIGURATION FILE
+
+.br
+All directives are shown with the standard default value where applicable, if
+omitted the default value will be used.
+
+.I EXTERNAL CONFIGURATION FILES
+
+.br
+All configuration directives can be optionally split into different
+configuration files and then read with the two following statements.
+
+.TP
+.I include <configuration file>
+Parse the specified configuration file.
+.TP
+.I includedir <directory>
+Parse all files inside <directory>. The files will be parsed in alphabetical
+order, keep in mind that regexps order matters so
+.I includedir
+should be used carefully, see
+.I REGEXP DEFINITIONS
+for details.
+.LP
+
+.I STATIC OPTIONS
+
+.br
+These options will be set the first time tenshi reads its config file. They
+cannot be changed by re-reading the config file. If you change one of these
+options and HUP tenshi it will die. You have been warned.
+
+.TP
+.I set uid tenshi
+Specify the effective user ID of the process when in daemon mode. The user must
+be able to read the selected log files, the configuration file and write the
+specified pid file. Using a privileged user is discouraged as it is not usually
+necessary (log files permissions can be set accordingly with most syslog
+implementations).
+.TP
+.I set gid tenshi
+Specify the effective group ID of the process when in daemon mode.
+.TP
+.I set pidfile /var/run/tenshi.pid
+The file containing the PID of the process, useful for start/stop
+scripts.
+.TP
+.I set logfile <log file path>
+A log file to monitor, this may be specified multiple times to watch more than
+one log file. Depending on your tail implementation you might need to use the
+.I tail_multiple
+setting for multiple files to work. This mode can be used along with
+.I fifo
+,
+.I listen
+and
+.I redisqueue
+settings.
+.TP
+.I set tail /usr/bin/tail -q --follow=name --retry -n 0
+Specify the path and arguments for the tail binary used for reading the log files. The invocation
+must be tuned against your current 'tail' implementation. Default values are configured for standard
+GNU coreutils tail. The
+.I --follow=name
+and
+.I --retry
+flags should deal properly with log rotation, if missing on your implementation we suggest that
+you use 'cp /dev/null logfile', or similar techniques, as a safe way to clear the log file upon rotation.
+.TP
+.I set tail_multiple <on|off>
+Some tail implementations do not handle more than one log file. When this option is enabled multiple
+tail commands will be forked, instead of a single command with multiple arguments. This
+option is disabled by default.
+.TP
+.I set fifo <fifo path>
+A FIFO file to monitor. This option allows you to use a syslog-ng
+.I pipe()
+destination (or any other syslog implementation that allows FIFO usage). This may be
+specified multiple times to watch more than one fifo file. This option is meant to be used
+only when the installed 'tail' binary doesn't behave properly with FIFOs, please
+test your tail implementation before using this. This mode can be used along with
+.I logfile
+,
+.I listen
+and
+.I redisqueue
+settings.
+.TP
+.I set listen 0.0.0.0:514
+Enables syslog server mode. With this option tenshi will bind to the specified address:port
+pair and read messages acting like a syslog server. We always recommend to filter the port
+accordingly and possibly stunnel, or similar wrappers, to encrypt the traffic. This mode can
+be used along with
+.I logfile
+,
+.I fifo
+and
+.I redisqueue
+settings.
+.TP
+.I set redisqueue <queue name>
+Enables monitoring of logs consumed from a Redis queue of the given name, this may be specified
+multiple times. See
+.I redisserver
+setting for instance specification. This mode can
+be used along with
+.I logfile
+,
+.I fifo
+and
+.I listen
+settings.
+.TP
+.I set redisserver 127.0.0.1:6379
+Specify the server path for the Redis instance to be used by the
+.I redisqueue
+setting. The parameter is passed to the new() method of the perl Redis binding, please refer to
+its manual for accepted values. The setting typically accepts an address:port pair or socket path.
+.LP
+
+.I DYNAMIC OPTIONS
+
+.br
+These options are set each time the config file is read. tenshi reads its
+config file once on start-up and whenever it receives a HUP.
+
+.TP
+.I set sleep 5
+The loop sleep time for the notification process. The value must be \<\= 60 seconds.
+.TP
+.I set limit <number of lines>
+The maximum number of messages per hostname allowed in a report, any lines
+after the maximum will be omitted and a warning included. If this option is
+omitted then no limit is applied.
+.TP
+.I set pager_limit <number of lines>
+The maximum number of messages per hostname allowed in pager friendly reports,
+any lines after the maximum will be omitted. If this option is omitted then no
+limit is applied.
+.TP
+.I set logprefix <regexp>
+All valid syslog messages are parsed by default, while non-syslog ones are
+discarded unless the special
+.I noprefix
+queue is set. This option allows to define an additional valid prefix for watching
+other type of logs. If the regexp is matched then the prefix is removed from
+the log and the first grouped string is used for the hostname field. This may
+be specified multiple times to watch many different non-syslog logs.
+.TP
+.I set mask ______
+The mask for strings enclosed by the grouping operators ( ). See the
+.I REGEXP DEFINITIONS
+section. 'set mask' on its own will set the mask to an empty string.
+.TP
+.I set mailserver localhost
+The mail server to be contacted for sending out reports.
+.TP
+.I set mailtimeout 10
+The timeout in seconds for mail server reply.
+.TP
+.I set mailhelo localhost.localdomain
+The client identification sent to the mailserver with the SMTP HELO command.
+.TP
+.I set subject tenshi report
+The subject of report emails, the queue name is always automatically appended.
+.TP
+.I set hidepid <on|off>
+This option turns on automatic stripping of 'foo[1234]:' style PID strings from
+the start of log lines i.e. 'foo[1234]:' becomes 'foo:'. This allows you to
+write regexps without worrying about masking the PID. Bear in mind that any time
+you change this option you will need to re-write your regex rules or they will
+not work. This option is disabled by default.
+.TP
+.I set filter <queue> <filter path> <arguments>
+When this option is enabled all reports matching the specified queue will be passed
+as STDIN to the specified filter, the resulting output is sent via smtp instead of
+the original report. The full path of the filter application must be specified.
+.TP
+.I set csv <cron_spec> <filter path> <arguments>
+This feature allows periodic reporting, using a five-field cron-style specification like
+the
+.I set queue
+option, to the specified filter. The output is pre-formatted as CSV (Comma Separated Values)
+with hostname,log,hits format. This feature was coded for using
+.BI AfterGlow
+.BI (http://afterglow.sf.net)
+as a filter and graphing tenshi output. Check the FAQ for sample usage.
+.TP
+.I set sort_order <descending|ascending>
+The sorting order for reports. It can be either descending or ascending, the
+number of messages is used as a key for sorting the log messages. The default
+order is ascending.
+.TP
+.I set resolve <on|off>
+This option turns on resolution of the fully qualified domain name for the hostname passed along
+with log messages and, if found, reports it along with the original one. This only affects reports
+and not pager messages. The name resolution is cached in order to avoid re-resolving addresses that
+have been seen already, you have to restart or HUP tenshi in order to flush the cache. This option
+is disabled by default.
+.TP
+.I set threshold <queue> <count> <regex>
+This option can be used to discard lines from a report that have a count below
+the given threshold. If a line matches the regex in the given queue but has
+fewer hits than count, it is discarded and omitted from the report. Note that
+this matches on the content of the lines that will actually appear in the
+report, in contrast to queue escalation which uses a count based on the regex
+that is matched.
+.LP
+
+.I QUEUES OPTIONS
+.br
+
+.br
+All messages are assigned to queues. Every queue is processed periodically
+according to its notification interval. There are four default builtin queues,
+.I trash
+to which unwanted messages can be assigned (think /dev/null),
+.I repeat
+which is used for smart repeat messages handling,
+.I group
+and
+.I group_host
+, see
+.I REGEXP DEFINITIONS
+for details. There's also a special
+.I noprefix
+queue, read further for details about it.
+.br
+
+All queues are automatically flushed before shutdown when a SIGTERM is
+received. Please see section
+.I SIGNALS
+for additional information.
+
+The syntax is the following:
+.TP
+.I set queue <queue_name> <mail_from> [pager:]<mail_to> <cron_spec> [<subject>]
+.TP
+.I <queue_name>
+The queue name. Can be any alphanumeric character string except for the builtin
+queues name.
+.TP
+.I <mail_from>
+The mail sender for reports related to the queue.
+.TP
+.I <mail_to>
+The mail recipient(s) for reports related to the queue. Multiple address can be
+specified, separated by commas. Using the
+.I pager:
+prefix enables a pager friendly report.
+.TP
+.I [<cron_spec>]
+This is a five-field cron-style specification for when the reports should be
+emailed. Ranges and skip values are supported as per the de facto crontab
+syntax with a few exceptions. Please see
+.I crontab
+man page for crontab syntax explanation. The supported day names are: Mon, Tue,
+Wed, Thu, Fri, Sat, Sun. Monday is 1, Sunday 0 or 7. Supported month names
+are: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec. Day and Month
+names are not case sensitive. Additionally, 'now' can be specified for
+immediate notifications.
+.TP
+.I <subject>
+This is the subject for to use for email reports regarding this queue. If this
+isn't specified then the default subject will be used.
+.LP
+
+The special
+.I noprefix
+queue can be used and defined like any other queue with the difference that it will get
+all messages that don't match any configured prefix.
+
+Examples:
+.br
+set queue report tenshi@localhost sysadmin@localhost [0 9-17 * * *]
+.br
+set queue report tenshi@localhost sysadmin@localhost [30 18 * * *]
+.br
+set queue report tenshi@localhost sysadmin@localhost [*/10 * * * *]
+.br
+set queue critical tenshi@localhost sysadmin@localhost,noc@localhost [now] CRITICAL WARNING -
+.br
+set queue pager tenshi@localhost pager:sysadmin_pager@localhost,pager:noc_pager@localhost [now] ALERT
+.LP
+
+.I REGEXP DEFINITIONS
+.br
+
+.br
+All valid syslog messages are matched against standard perl regexps, all
+regexps are defined with the following syntax:
+.TP
+.I <queue_name>[,<queue_name>[:<escalation_number>]..] <regexp>
+.LP
+
+The regexps are evaluated in order so a matched message is not checked against
+the subsequent regexps. Keep this in mind when assembling the configuration
+file. It's advisable to catch all messages by placing an all matching regexp at
+the end of the configuration file. It's also good for performance having trash
+rules not logically connected with other matching rules at the beginning of the
+section. Multiple queues can be defined with a comma separated list, builtin
+queues cannot be used when using this syntax.
+
+.br
+If an escalation number is provided for a queue, the matched message will only
+be placed into the queue when <escalation_number> messages have matched the
+regexp. The queue will receive the message that matched the regexp at the time
+of escalation, with a count equal to the escalation number. The count of
+messages matching the regexp will be reset when the left most queue mentioned
+in the queue list is mailed. The left most queue cannot have an escalation
+number unless it is the only queue listed. When the number of messages that
+match the regexp reaches the greatest escalation number mentioned, escalation
+will begin again into the escalation queues, modulus the greatest escalation
+number. For example, using the queues `a,b:10,c:50', when 10 messages match the
+regexp, a message will go into b, when 50 match, one will go into c. At 60,
+another will go into b, and at 100, another into c, 110 to b, 150 to c, and so
+on. Escalation numbers must be positive integers greater than zero and must be
+listed in increasing order from left to right. All queues without escalation
+numbers must be listed more left than the queues with escalation numbers.
+
+.br
+The standard grouping operators
+.I ( )
+can be used for string masking, literal "(" and ")" can be protected with the
+standard quotation operator "\\". There's a lot of documentation about regular
+expressions, a good start could be perl
+.I perlre
+and
+.I perlretut
+manual pages.
+.br
+You can also use the (?: ) operators to use groups without masking. This allows
+you to match, for example, output from several programs in a similar format.
+There is an example of this below (the sudo/su line).
+
+.br
+The builtin queue
+.I repeat
+can be used for special handling of "last message repeated x times" style log
+lines. When the assigned regexps are matched the line count for the last line
+received from the same host is incremented by the first grouped string. Keep in
+mind that it is possible for syslog lines to be received from remote hosts out
+of order. If this happens you should not use this feature because tenshi will
+mis-report line counts.
+
+.br
+The builtin queue
+.I group
+can be used to group sets of regex together to speed up line matching. If a
+line fails to match a regex assigned to the group queue then tenshi will skip
+all the regex up until the next
+.I group_end
+statement. Nested groups are allowed. An example of this is included below.
+
+.br
+The builtin
+.I group_host
+queue can be used for selective hostname matching. Like the
+.I group
+queue it is also terminated with the
+.I group_end
+statement. All regex definitions within that group will only apply if the hostname
+associated to the log entries matches the regex passed to the
+.I group_host
+definition.
+
+.br
+The regexps below assume
+.I hidepid
+is turned on. If you have it turned off then you will need to add in \\[(.+)\\]
+to the regex following the progam name to get them to work.
+.br
+For example:
+mail ^sendmail: (.+): to=(.+),(.+)delay=(.+)
+becomes:
+mail ^sendmail\\[(.+)\\]: (.+): to=(.+),(.+)delay=(.+)
+
+Examples:
+
+.br
+trash ^xinetd
+
+.br
+repeat ^(?:last message repeated|above message repeats) (\\d+) time
+
+.br
+group ^sendmail:
+.br
+mail ^sendmail: (.+): to=(.+),(.+)delay=(.+)
+.br
+mail ^sendmail: (.+): to=(.+),(.+)relay=(.+),(.+)stat=Sent
+.br
+group_end
+
+.br
+group_host mailserver1
+.br
+mail1 ^sendmail
+.br
+mail1 ^sendmail:.+
+.br
+critical,mail1 ^sendmail:.+SYSERR.+
+.br
+group_end
+
+.br
+mail ^ipop3d: Login user=(.+)
+
+.br
+critical,report ^sshd: Illegal user
+
+.br
+general,urgent:200,critical:1000 ^sshd: Illegal user
+
+.br
+root ^sshd\\(pam_unix\\): session opened for user root by root\\(uid=0\\)
+
+.br
+report ^sshd: Accepted rsa for (.+) from (.+) port (.+)
+
+.br
+trash ^sshd
+
+.br
+critical ^(?:sudo|su):
+
+.br
+critical,pager ^Oops
+
+.br
+misc .*
+
+
+.SH SIGNALS
+.br
+tenshi can handle different signals sent to the process, here's the list of
+supported ones:
+
+.TP
+.B TERM
+flush all queues and then exit
+.TP
+.B INT
+flush all queues and then exit
+.TP
+.B USR1
+flush any queues which have reached their notification interval
+.TP
+.B USR2
+force all queues to be flushed, even if they have not reached their
+notification interval
+.TP
+.B HUP
+force all queues to be flushed, even if they have not reached their
+notification interval, re-read the config file and continue as normal.
+.LP
+.I WARNING:
+If you change a STATIC OPTION in the config file and send tenshi a HUP it will
+die. You will need to restart tenshi for changes to STATIC OPTIONs to take
+effect.
+
+.SH EXAMPLES
+See the included tenshi.conf.
+
+.SH REQUIREMENTS
+
+- Perl.
+.br
+
+- A working 'tail' implementation, when using the
+.I logfile
+option.
+.br
+
+- The Net::SMTP perl module to mail reports, typically included
+in perl installations.
+
+- The IO::BufferedSelect perl module.
+
+- The Redis perl module, when using the
+.I redisqueue
+option.
+
+Any missing module can be downloaded from CPAN (http://www.cpan.org) or installed
+using the CPAN shell (`perl -e shell -MCPAN`).
+
+.SH BUGS
+Double quote characters present in your logs might break csv output (depending on how you pipe/process
+it in the filter) since there's no escape code (yet).
+
+Please report any bugs you find at
+.BI <tenshi@inversepath.com>
+
+.SH LICENSE
+.B tenshi
+is distributed under the terms of the following ISC-style license:
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+.SH DISTRIBUTION
+
+The tenshi project page is
+.BI http://www.inversepath.com/tenshi.html
+
+.SH NOTES
+
+tenshi was once known as
+.I wasabi.
+The name was changed due to a trademark claim relating to another piece of software.
+
+.SH SEE ALSO
+
+It should be noted that tenshi was initially a perl rewrite of
+.I oak
+.RI ( http://www.ktools.org ).
+
+.I Friedl, Jeffrey E. F. Mastering Regular Expressions, 2nd Edition. O'Reilly
+
+.SH AUTHORS
+
+Copyright 2004-2014 Andrea Barisani <andrea@inversepath.com>
+

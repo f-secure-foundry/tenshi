@@ -1,0 +1,108 @@
+#!/bin/sh
+#
+# tenshi        Start tenshi log monitor
+#
+# chkconfig: 2345 08 92
+# description:  Starts, stops tenshi log monitor daemon
+#
+# config: /etc/tenshi/tenshi.conf
+
+# Source function library.
+. /etc/init.d/functions
+
+TENSHI=tenshi
+
+VAR_SUBSYS_TENSHI=/var/lock/subsys/$TENSHI
+
+
+start() {
+
+    echo -n $"Starting tenshi: "
+    daemon /usr/sbin/tenshi -c /etc/tenshi/tenshi.conf -P /var/run/tenshi/tenshi.pid
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && touch $VAR_SUBSYS_TENSHI
+    return $RETVAL
+
+}
+
+stop() {
+
+    echo -n $"Stopping tenshi: "
+    killproc tenshi
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && rm -f $VAR_SUBSYS_TENSHI
+    return $RETVAL
+
+}
+
+status() {
+
+    if [ ! -f "$VAR_SUBSYS_TENSHI" ]; then
+        echo $"tenshi is stopped."
+        return 1
+    fi
+
+    echo "Running: `cat /var/run/tenshi/tenshi.pid`"
+
+    return $RETVAL
+
+}
+
+reload() {
+
+    status
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ]; then
+        echo -n $"Reloading tenshi: "
+        kill -HUP `cat /var/run/tenshi/tenshi.pid` &>/dev/null
+        RETVAL=$?
+        echo
+        [ $RETVAL -eq 0 ]
+        return $RETVAL
+    else
+        return $RETVAL
+    fi
+
+}
+
+flush() {
+
+    echo -n $"Flushing Queues: "
+    kill -USR2 `cat /var/run/tenshi/tenshi.pid` &>/dev/null
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ]
+    return $RETVAL
+
+}
+
+restart() {
+    stop
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    reload)
+        reload
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart|reload|flush|status}"
+        exit 1
+        ;;
+esac
+
+exit $?

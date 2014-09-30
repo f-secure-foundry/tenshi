@@ -1,0 +1,36 @@
+#!/bin/bash
+
+test -f /usr/sbin/tenshi || exit 0
+
+case "$1" in
+  start)
+	echo -n "Starting log monitor: tenshi"
+	start-stop-daemon --start --exec /usr/sbin/tenshi
+	echo "."
+	;;
+  stop)
+	echo -n "Stopping log monitor: tenshi"
+	start-stop-daemon --stop --quiet --pidfile /var/run/tenshi/tenshi.pid
+	echo "."
+	;;
+  reload)
+	echo -n "Reloading log monitor: tenshi"
+	kill -HUP `cat /var/lib/tenshi/tenshi.pid` &>/dev/null
+	echo "."
+	;;
+  restart)
+	echo -n "Stopping log monitor: tenshi"
+	start-stop-daemon --stop --quiet --pidfile /var/run/tenshi/tenshi.pid
+	echo "."
+	sleep 1
+	echo -n "Starting log monitor: tenshi"
+	start-stop-daemon --start --quiet --exec /usr/sbin/tenshi
+	echo "."
+	;;
+  *)
+	echo "Usage: /etc/init.d/tenshi {start|stop|restart}" >&2
+	exit 1
+	;;
+esac
+
+exit 0

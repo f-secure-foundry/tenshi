@@ -1,0 +1,1267 @@
+#!/usr/bin/perl
+#
+# tenshi 0.15 2014/08/04
+# <tenshi@inversepath.com>
+#
+# Copyright 2004-2014 Andrea Barisani <andrea@inversepath.com>
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+use strict;
+use warnings;
+use Net::SMTP;
+use File::Temp;
+use Sys::Hostname;
+use IO::Socket::INET;
+use filetest 'access';
+use IO::BufferedSelect;
+use Term::ANSIColor qw(:constants);
+use Getopt::Long qw(:config no_ignore_case);
+use POSIX qw(locale_h setsid setuid setgid strftime floor);
+
+setlocale(LC_TIME, "C");
+File::Temp->safe_level(File::Temp::HIGH);
+$Term::ANSIColor::AUTORESET = 1;
+
+my $version = '0.15';
+
+my %opts;
+GetOptions('configuration=s' => \$opts{'c'}, 'Check'      => \$opts{'C'},
+           'debug:i'         => \$opts{'d'}, 'foreground' => \$opts{'f'},
+           'profile'         => \$opts{'p'}, 'Pid=s'      => \$opts{'P'},
+           'help'            => \$opts{'h'});
+if ($opts{'h'}) { usage(); }
+
+my $our_hostname = hostname();
+my @startup_time = localtime();
+
+my ($uid, $gid);
+
+my $last_check     = 0;
+my $last_minute    = 0;
+my $sleep          = 5;
+my $mailtimeout    = 10;
+my $select_timeout = 1;
+my $saved_pid      = 0;
+
+my $config_reinit  = 1;
+
+my ($mailserver, $mailhelo, $limit, $pager_limit, $hidepid, $status, $listen, $resolve);
+my (%main, %last_match, %last_queue, %filter_file, %filter_args, %hostnames, %regexp_matches);
+my ($config_read, $queue_flush_needed, $queue_check_needed, $time_to_die);
+my (@log_files, @fifo_files, @log_prefix, @regexp, @queues, @skip, @group_stack, @queues_escalation);
+my (@redis_queues, $redisserver, $redis);
+my ($syslog_sender, $syslog_listen_socket);
+
+my $profile     = $opts{'p'} || 0;
+my $foreground  = $opts{'f'} || 0;
+my $config_file = $opts{'c'} || '/etc/tenshi/tenshi.conf';
+my $pid_file    = $opts{'P'} || '/var/run/tenshi.pid';
+
+my ($debug, $debug_smtp);
+
+$debug      = (defined($opts{'d'}) && $opts{'d'} == 0) ? 1 : $opts{'d'} || 0;
+$debug_smtp = ($debug > 1) ? 1 : 0;
+
+my $tail_file = '/usr/bin/tail';
+my $tail_args = '-q --follow=name --retry -n 0';
+my $tail_multiple = 'off';
+my @tail_pids;
+
+my @fhs;
+
+my %days =   ( 'mon' => 1, 'tue' => 2, 'wed' => 3,
+               'thu' => 4, 'fri' => 5, 'sat' => 6,
+               'sun' => 0 );
+
+my %months = ( 'jan' => 1,  'feb' => 2,  'mar' => 3,
+               'apr' => 4,  'may' => 5,  'jun' => 6,
+               'jul' => 7,  'aug' => 8,  'sep' => 9,
+               'oct' => 10, 'nov' => 11, 'dec' => 12 );
+
+my @cron_specs = (
+    { 'min' => 0, 'max' => 59, 'shift' => 0,  'wrap' => 0, 'localtime_field' => 1 },
+    { 'min' => 0, 'max' => 23, 'shift' => 0,  'wrap' => 0, 'localtime_field' => 2 },
+    { 'min' => 1, 'max' => 31, 'shift' => 0,  'wrap' => 0, 'localtime_field' => 3 },
+    { 'min' => 1, 'max' => 12, 'shift' => -1, 'wrap' => 0, 'localtime_field' => 4, 'strings' => \%months },
+    { 'min' => 0, 'max' => 7,  'shift' => 0,  'wrap' => 1, 'localtime_field' => 6, 'strings' => \%days   },
+);
+
+my $mask        = '______';
+my $mask_length = length $mask;
+my $subject     = 'tenshi report';
+my $sort_order  = 'descending';
+
+# prototype for clean_up so we don't need parens
+sub clean_up;
+
+config_read($config_file);
+$config_read = 1;
+
+if ($opts{'C'}) { exit 0; }
+
+if (not defined($uid)) { $uid = getpwnam('tenshi') or clean_up and die RED "[ERROR] no such user: tenshi\n"; }
+if (not defined($gid)) { $gid = getgrnam('tenshi') or clean_up and die RED "[ERROR] no such group: tenshi\n"; }
+
+if ($listen) {
+    $syslog_listen_socket = IO::Socket::INET->new(
+        LocalAddr => $listen,
+        Proto =>     'udp'
+    ) or clean_up and die "[ERROR] can't bind UDP socket: $!\n";
+    push @fhs, $syslog_listen_socket;
+}
+
+$SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; print RED "[ERROR] child died, bailing out\n"; $time_to_die = 1; };
+
+prepare_process();
+
+#
+# sanity checks
+#
+
+if (!$profile) {
+    foreach my $queue (@queues) {
+        if ($filter_file{$queue} and ! -x $filter_file{$queue}) {
+            clean_up and die RED "[ERROR] $filter_file{$queue}: not executable\n";
+        }
+    }
+
+    if ($main{'csv'} and ! -x $main{'csv'}{'path'}) {
+        clean_up and die RED "[ERROR] $main{'csv'}{'path'}: not executable\n";
+    }
+
+    if (scalar(@redis_queues) > 0) {
+        $debug && debug(23, 'testing Redis module availability');
+        require Redis;
+    }
+
+    my @readable_log_files;
+
+    foreach my $log (@log_files) {
+        unless (-f $log) {
+            print STDERR RED "[WARNING] $log: no such file\n";
+            next;
+        }
+
+        unless (-r $log) {
+            print STDERR RED "[WARNING] $log: file not readable\n";
+            next;
+        }
+        push @readable_log_files, $log;
+    }
+
+    @readable_log_files > 0 || @fifo_files > 0 || @redis_queues > 0 || $listen
+        or clean_up and die RED "[ERROR] no readable log files\n";
+
+    @log_files = @readable_log_files;
+}
+
+#
+# log file parsing
+#
+
+if ($profile) {
+    open(my $fh, "-") or
+        clean_up and die RED "[ERROR] could not open standard input: $!\n";
+    push @fhs, $fh;
+} else {
+    if (scalar(@log_files) > 0) {
+        clean_up and die RED "[ERROR] $tail_file: $!\n" if (! -f $tail_file);
+        my @remaining = @log_files;
+
+        do {
+            my $log;
+
+            if ($tail_multiple eq 'on') {
+                $log = shift @remaining;
+            } else {
+                $log = join(' ', @remaining);
+                @remaining = ();
+            }
+
+            $debug && debug(20, "$tail_file $tail_args $log");
+
+            pipe(my $r, my $w) or clean_up and die RED "[ERROR] could not open pipe for tail: $!\n";
+            my $pid = fork();
+            defined($pid) or clean_up and die RED "[ERROR] failed first fork for tail: $!\n";
+
+            if ($pid) {
+                close $w;
+                push @fhs, $r;
+                push @tail_pids, $pid;
+            } else {
+                # this is child, no clean_up
+                open(STDOUT, ">&", $w) or die RED "[ERROR] can't re-open pipe as STDOUT: $!\n";
+                close $r;
+                open(STDERR, ">/dev/null") or die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
+                exec("$tail_file $tail_args $log") or die RED "[ERROR] failed to exec tail command: $!\n";
+            }
+        } while (@remaining);
+    }
+
+    if (scalar(@fifo_files) > 0) {
+        foreach my $fifo_file (@fifo_files) {
+            $debug && debug(19, "$fifo_file");
+            open(my $fh, "+<$fifo_file") or
+                clean_up and die RED "[ERROR] could not open $fifo_file: $!\n";
+            push @fhs, $fh;
+        }
+    }
+
+    if (scalar(@redis_queues) > 0) {
+        $debug && debug(23, 'opening Redis connection');
+
+        if (defined $redisserver) {
+            $redis = Redis->new(server => $redisserver);
+        } else {
+            $redis = Redis->new;
+        }
+
+        $redis->ping || die RED "[ERROR] could not open connection to redis on $redisserver: $!\n";
+
+        $debug && debug(23, "created redis socket $redis");
+    }
+}
+
+unless (scalar(@fhs) > 0 or scalar(@redis_queues) > 0) {
+    clean_up and die RED "[ERROR] no log file has been specified\n";
+}
+
+if (!($debug or $profile or $foreground)) {
+    close STDOUT               or clean_up and die RED "[ERROR] can't close STDOUT: $!\n";
+    open(STDOUT, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDOUT as /dev/null: $!\n";
+    close STDERR               or clean_up and die RED "[ERROR] can't close STDERR: $!\n";
+    open(STDERR, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
+}
+
+$debug && debug(3);
+
+$SIG{'TERM'} = sub { $debug && debug(5,'TERM') ; $status = 'terminating'; $queue_flush_needed = 1; $time_to_die   = 1; };
+$SIG{'INT'}  = sub { $debug && debug(5, 'INT') ; $status = 'terminating'; $queue_flush_needed = 1; $time_to_die   = 1; };
+$SIG{'HUP'}  = sub { $debug && debug(5, 'HUP') ; $status = 'reloading'  ; $queue_flush_needed = 1; $config_reinit = 1; };
+$SIG{'USR1'} = sub { $debug && debug(5,'USR1') ; $status = 'queue check'; $queue_check_needed = 1; };
+$SIG{'USR2'} = sub { $debug && debug(5,'USR2') ; $status = 'flushing'   ; $queue_flush_needed = 1; };
+
+my $bs = IO::BufferedSelect->new(@fhs);
+
+if (!($debug || $profile || $foreground)) {
+    daemonize();
+}
+
+save_pid();
+
+while (!$time_to_die) {
+    my $now = time;
+    my ($fh, $line);
+
+    if ($now > ($last_check + $sleep)) {
+        $queue_check_needed = 1;
+    }
+
+    if ($queue_flush_needed) { queues_flush();            $queue_flush_needed = 0; $queue_check_needed = 0; }
+    if ($queue_check_needed) { queues_check($now);        $queue_check_needed = 0; }
+    if ($config_reinit)      { config_read($config_file); $config_reinit      = 0; }
+    if ($time_to_die)        { last; }
+
+    my @ready = $bs->read_line($select_timeout);
+
+    foreach (@ready) {
+        ($fh, $line) = @$_;
+
+        if ($listen and $fh == $syslog_listen_socket) {
+            $line =~ s/^<\d+>//;
+
+            if (! ($line =~ /^[A-Z][a-z]{2}\s(?:\s|\d)\d\s\d{2}:\d{2}:\d{2}\s(\S+)\s/)) {
+                my ($port, $ipaddr) = sockaddr_in(getpeername($syslog_listen_socket));
+
+                if (not defined $hostnames{$ipaddr}) {
+                    $hostnames{$ipaddr} = gethostbyaddr($ipaddr, AF_INET);
+                }
+
+                my $time = strftime "%b %e %H:%M:%S", localtime;
+                $line = sprintf("%s %s %s", $time, $hostnames{$ipaddr}, $line);
+            }
+        }
+
+        if ($profile and not defined($line)) { print BLUE, "[PROFILE] reached end of file\n"; $time_to_die = 1; next; }
+
+        parse_line($line);
+    }
+
+    foreach my $redis_queue (@redis_queues) {
+        while($redis->llen($redis_queue) > 0) {
+            $line = $redis->lpop($redis_queue);
+            parse_line($line);
+        }
+    }
+
+    # throttle down loop on void reads
+    unless ($line) { print("sleep\n"); sleep(1) };
+}
+
+queues_flush();
+
+clean_up();
+
+exit 0;
+
+#
+# subs
+#
+
+sub config_read {
+    my $config_file = shift;
+
+    $debug && debug(0,$config_file);
+
+    if ($config_reinit) {
+        %main               = ();
+        %hostnames          = ();
+        @regexp             = ();
+        %regexp_matches     = ();
+        @queues             = ();
+        @queues_escalation  = ();
+        @skip               = ();
+        @log_prefix         = ();
+        $main{'group'}      = {};
+        $main{'trash'}      = {};
+        $main{'repeat'}     = {};
+        $main{'group_host'} = {};
+
+        $hidepid = 0;
+        $resolve = 0;
+
+        push @log_prefix, qr/^[A-Z][a-z]{2}\s(?:\s|\d)\d\s\d{2}:\d{2}:\d{2}\s(\S+)\s/;
+
+        $config_reinit = 0;
+    }
+
+    #
+    # configuration file parsing
+    #
+
+    open(my $CONF,$config_file) or clean_up and die RED "[ERROR] could not open configuration file $config_file: $!\n";
+
+    while (<$CONF>) {
+        s/^\s+//;
+        next if (/^#|^$/);
+        chomp;
+
+        if (/^include\s+(\S+)/) { $debug && debug(1,$_) ; config_read($1); next; }
+
+        if (/^includedir\s+(\S+)/) {
+            $debug && debug(1,$_);
+            opendir(my $DIR, $1) or clean_up and die RED "[ERROR] could not open directory $1: $!\n";
+            foreach my $file (sort readdir($DIR)) {
+                next if ($file =~ /^\./);
+                next unless -f "$1/$file";
+                config_read("$1/$file");
+            }
+            next;
+        }
+
+        if (/^set\s+logfile\s+(\S+)/) {
+            if ($config_read and (!grep(/^$1$/, @log_files))) {
+                clean_up and die debug(100,'logfile');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            push @log_files, $1;
+        }
+        elsif (/^set\s+redisqueue\s+(\S+)/) {
+            if ($config_read and (!grep(/^$1$/, @redis_queues))) {
+                clean_up and die debug(100,'redisqueue');
+            } elsif (!$config_read) {
+                $debug && debug(1, $_);
+            }
+            push @redis_queues, $1;
+        }
+        elsif (/^set\s+fifo\s+(\S+)/) {
+            if ($config_read and (!grep(/^$1$/, @fifo_files))) {
+                clean_up and die debug(100,'fifo');
+            } elsif (!$config_read) {
+                $debug && debug(1, $_);
+            }
+            push @fifo_files, $1;
+        }
+        elsif (/^set\s+pidfile\s+(\S+)/) {
+            next if $opts{'P'};
+            if ($config_read and ($1 ne $pid_file)) {
+                clean_up and die debug(100,'pidfile');
+            } elsif (!$config_read and (!$opts{'P'})) {
+                $debug && debug(1,$_);
+            }
+            $pid_file = $1;
+        }
+        elsif (/^set\s+tail\s+(\S+)\s*(\S+.*)?/) {
+            if ($config_read and ($1 ne $tail_file)) {
+                clean_up and die debug(100,'tail');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            $tail_file = $1;
+            $tail_args = $2 || $tail_args;
+        }
+        elsif (/^set\s+tail_multiple\s+(off|on)/) {
+            if ($config_read and ($1 ne $tail_multiple)) {
+                clean_up and die debug(100,'tail_multiple');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            if ($1 eq 'on') { $tail_multiple = 'on'; }
+            else { $tail_multiple = 'off'; }
+        }
+        elsif (/^set\s+uid\s+(.+)/) {
+            if ($config_read and (getpwnam($1) ne $uid)) {
+                clean_up and die debug(100,'uid');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            $uid = getpwnam($1);
+            clean_up and die RED "[ERROR] no such user: $1\n" if not defined $uid;
+            if (not defined $uid) { clean_up and die RED "[ERROR] no such user: $1\n"; }
+        }
+        elsif (/^set\s+gid\s+(.+)/) {
+            if ($config_read and (getgrnam($1) ne $gid)) {
+                clean_up and die debug(100,'gid');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            $gid = getgrnam($1);
+            if (not defined $gid) { clean_up and die RED "[ERROR] no such group: $1\n"; }
+        }
+        elsif (/^set\s+listen\s+(\d+\.\d+\.\d+\.\d+:\d+)/) {
+            if ($config_read and ($1 ne $listen)) {
+                clean_up and die debug(100,'listen');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            $listen = $1;
+        }
+        elsif (/^set\s+sort_order\s+(\S+)/) {
+            if ($1 =~ /^(ascending|descending)$/) {
+                $sort_order = $1;
+                $debug && debug(1,$_); next; }
+            else {
+                clean_up and die RED "[ERROR] sort_order is invalid";
+            }
+        }
+        elsif (/^set\s+limit\s+(\d+)/)             { $limit           = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+subject\s+(.+)/)            { $subject         = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+mailserver\s+(.+)/)         { $mailserver      = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+mailhelo\s+(.+)/)           { $mailhelo        = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+pager_limit\s+(\d+)/)       { $pager_limit     = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+mailtimeout\s+(\d+)/)       { $mailtimeout     = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+redisserver\s+(.+)/)        { $redisserver     = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+filter\s+(\S+)\s+(\S+)\s*(\S+.*)?/) {
+            $filter_file{$1} = $2;
+            $filter_args{$1} = $3 || "";
+            $debug && debug(1,$_); next;
+        }
+        elsif (/^set\s+sleep\s+(\d+)/)      {
+            if ($sleep > 60) { clean_up and die RED "[ERROR] sleep time should be <= 60 seconds\n"; } else {
+                $sleep = $1; $debug && debug(1,$_); next;
+            }
+        }
+        elsif (/^set\s+logprefix\s+(.+)/)   {
+            push @log_prefix, qr/$1/;
+            $debug && debug(1,$_);
+        }
+        elsif (/^set\s+mask(\s+(\S+))?/)    {
+            $mask        = ($1 ? $2: '');
+            $mask_length = length $mask;
+            $debug && debug(1,$_);
+        }
+        elsif (/^set\s+hidepid\s+(off|on)/) {
+            if ($1 eq 'on') { $hidepid = 1; }
+            else { $hidepid = 0; }
+            $debug && debug(1,$_);
+        }
+        elsif (/^set\s+resolve\s+(off|on)/) {
+            if ($1 eq 'on') { $resolve = 1; }
+            else { $resolve = 0; }
+            $debug && debug(1,$_);
+        }
+        elsif
+        (/^set\s+queue\s+(\S+)\s+(\S+(?:\@\S+)?)\s+(pager:)?(\S+(?:\@\S+)?)\s+\[((?:\S+(?:\s+)?){5}|now)\]\s*(\S+.*)?/o) {
+
+            my ($queue, $mail_from, $pager, $mail_to, $cron_spec, $subject) = ($1, $2, $3, $4, $5, $6);
+
+            if (queue_is_builtin($queue)) {
+                clean_up and die RED "[ERROR] '$queue' is a built-in queue\n";
+            }
+
+            if ($queue eq 'csv') {
+                clean_up and die RED "[ERROR] '$queue' is a special queue and must be defined with 'set csv' option\n";
+            }
+
+            if ($cron_spec eq 'now') {
+                $main{$queue}{'now'} = 1;
+            } else {
+                $main{$queue}{'cron_mask'} = cron_spec_to_mask($cron_spec);
+            }
+
+            if ($pager) { $main{$queue}{'pager'} = 1; }
+
+            $main{$queue}{'mailfrom'} = $mail_from; $debug && debug(1,"queue: $queue - mail_from => $mail_from");
+            $main{$queue}{'mailto'}   = $mail_to;   $debug && debug(1,"queue: $queue - mailto    => $mail_to");
+
+            if ($subject) {
+                $main{$queue}{'subject'} = $subject;  $debug && debug(1,"queue: $queue - subject => $subject");
+            }
+
+        }
+        elsif
+        (/^set\s+csv\s+\[((?:\S+(?:\s+)?){5}|now)\]\s+(\S+)\s*(.*)?/o) {
+
+            my $cron_spec = $1;
+            ($main{'csv'}{'path'}, $main{'csv'}{'args'}) = ($2, $3);
+
+            if ($cron_spec eq 'now') {
+                $main{'csv'}{'now'} = 1;
+            } else {
+                $main{'csv'}{'cron_mask'} = cron_spec_to_mask($cron_spec);
+            }
+
+        }
+        elsif (/^set\s+threshold\s+(\S+)\s+(\d+)\s+(.+$)/) {
+            my ($queue, $count, $re) = ($1, $2, $3);
+
+            unless (defined $main{$queue}) {
+                clean_up and die RED "[ERROR] invalid queue in threshold set directive: $_\n"
+            }
+
+            if ($count <= 0) {
+                clean_up and die RED "[ERROR] invalid count in threshold set directive: $_\n"
+            }
+
+            unless(defined $main{$queue}{'threshold'}) {
+                $main{$queue}{'threshold'} = []
+            }
+
+            # store $re, $count pair in the array
+            push @{$main{$queue}{'threshold'}}, qr/$re/, $count;
+
+        }
+        elsif (/^set\s+/) {
+            clean_up and die RED "[ERROR] invalid set directive: $_\n";
+        }
+        elsif (my ($queue, $reg) = $_ =~ /(^\S+)\s+(.+$)/) {
+
+            $debug && debug(1,"queue: $queue regexp: $reg");
+
+            my @queue = split(/,/, $queue);
+            my %queue_escalation;
+
+            my $max_escalation = 0;
+            foreach my $q (@queue) {
+                my ($queue, $escalation) = split(/:/, $q);
+
+                if (!($main{$queue})) {
+                    clean_up and die RED "[ERROR] invalid configuration directive: queue $queue not defined\n";
+                }
+
+                if ((scalar(@queue) > 1) and queue_is_builtin($queue)) {
+                    clean_up and die RED "[ERROR] built-in queue not allowed in multiple queues declaration\n";
+                }
+
+                if (($queue =~ /:/) && queue_is_builtin($queue)) {
+                    clean_up and die RED "[ERROR] built-in queues are not allowed to have an escalation number\n";
+                }
+
+                if (defined($escalation)) {
+                    if ($escalation !~ m/^[1-9]\d*$/) {
+                        clean_up and die RED "[ERROR] escalation number must be a positive integer greater than zero\n";
+                    }
+
+                    if ($escalation >= $max_escalation) {
+                        $max_escalation = $escalation;
+                    } else {
+                        clean_up and die RED "[ERROR] escalation numbers must increase from left to right in the queue list\n";
+                    }
+
+                    $queue_escalation{$queue} = $escalation;
+                } else {
+                    if ($max_escalation) {
+                        clean_up and die RED "[ERROR] all queues without escalation numbers must be listed more left than the queues with escalation numbers\n";
+                    }
+                }
+            }
+
+            if (@queue > 1 and $queue[0] =~ /:/) {
+                clean_up and die RED "[ERROR] left most queue in a multiple queue declaration can not have an escalation number\n";
+            }
+
+            if ($queue eq 'group')      { push @group_stack, scalar(@regexp); }
+            if ($queue eq 'group_host') { push @group_stack, scalar(@regexp); }
+            push @regexp, qr/$reg/;
+            $queue =~ s/:\d*//g;
+            push @queues, $queue;
+            push @queues_escalation, \%queue_escalation;
+            push @skip, 0;
+
+        }
+        elsif (/^group_end/) {
+
+            if (scalar(@group_stack) < 1) {
+                clean_up and die RED "[ERROR] tried to close a group when there are non open\n";
+            }
+
+            $skip[pop @group_stack] = scalar(@regexp) || 0;
+
+        } else {
+            clean_up and die RED "[ERROR] invalid configuration directive: $_\n";
+        }
+    }
+
+    close $CONF;
+
+    clean_up and die RED "[ERROR] no smtp server specified" if (!$mailserver);
+
+    $debug && debug(2,$config_file);
+
+    if ($debug) {
+        for (my $i = 0; $i < scalar(@regexp); $i++) {
+        debug(18, $i, $regexp[$i]);
+        }
+    }
+}
+
+sub parse_line {
+    my $line = $_[0];
+
+    if (defined $line) {
+
+        if ($time_to_die) { next; }
+
+        my $hostname;
+        my $has_prefix;
+
+        chomp($line); $debug && debug(6,$line);
+
+        foreach my $log_prefix (@log_prefix) {
+            if ($line =~ s/$log_prefix//) {
+                $has_prefix = 1;
+                $hostname = $1; last;
+            }
+        }
+
+        if (!$has_prefix && $main{'noprefix'}) {
+            $debug && debug(7,'noprefix',$line);
+            $main{'noprefix'}{'logs'}{'[unprefixed logs]'}{$line}++;
+        }
+
+        return unless defined($hostname);
+
+        if ($hidepid) { $line =~ s/^(\S+)\[\d+\]: /$1: /o; }
+
+        for (my $index = 0; $index <= $#regexp; $index++) {
+            my $regexp = $regexp[$index];
+            my $queue  = $queues[$index];
+            my $queue_escalation = $queues_escalation[$index];
+            my @queue  = split(/,/, $queues[$index]);
+
+            if ($queue eq 'group_host') {
+                if ($hostname =~ /$regexp/) {
+                    next;
+                } elsif ($skip[$index] > 0) {
+                    $debug && debug(9,$skip[$index],$line);
+                    $index = ($skip[$index] - 1);
+                    next;
+                }
+            }
+
+            if ($line =~ /$regexp/) {
+                $debug && debug(7,$queue,$line);
+
+                if ($queue eq 'trash') {
+                    $last_queue{$hostname} = $queue;
+                    $last_match{$hostname} = $line;
+                    last;
+                }
+
+                next if ($queue eq 'group');
+
+                if ($queue eq 'repeat' and $last_match{$hostname}) {
+                    unless (defined $1) {
+                        $debug && debug(22);
+                        last;
+                    }
+
+                    my @last_queue = split(/,/, $last_queue{$hostname});
+
+                    foreach my $last_queue (@last_queue) {
+                        next if $last_queue eq 'trash';
+                        $main{$last_queue}{'logs'}{$hostname}{$last_match{$hostname}} += $1;
+                    }
+
+                    last;
+                }
+
+                my $offset = 0;
+                my ($begin, $end);
+
+                foreach my $i (1 .. $#-) {
+                    next unless defined($-[$i]);
+
+                    $begin = $-[$i] + $offset;
+                    $end   = $+[$i] + $offset;
+                    my $length = ($end - $begin);
+
+                    substr($line, $begin, $length, $mask);
+
+                    $offset += ($mask_length - $length);
+                }
+
+                $debug && debug(8,$line);
+
+                $last_queue{$hostname} = $queue;
+                $last_match{$hostname} = $line;
+
+                $regexp_matches{$hostname}[$index]++;
+
+                my $max_escalation = $queue_escalation->{$queue[$#queue]};
+
+                foreach my $queue (@queue) {
+                    my $escalation = $queue_escalation->{$queue};
+
+                    if ($escalation) {
+                        # If the regexp has matched enough lines to escalate, put the line in the queue.
+                        # When the queue with the largest escalation number receives a message, then we
+                        # want the escalation count to essentially reset, looping escalation back around
+                        # through the other escalation queues, but without actually resetting the number
+                        # of matches.
+                        my $lines = $regexp_matches{$hostname}[$index] % $max_escalation;
+                        if ($escalation == $lines || ($escalation == $max_escalation && $lines == 0)) {
+                            $main{$queue}{'logs'}{$hostname}{$line} = $regexp_matches{$hostname}[$index];
+                        }
+                    } else {
+                        $main{$queue}{'logs'}{$hostname}{$line}++;
+                    }
+                }
+
+                last;
+            }
+            elsif ($skip[$index] > 0) {
+                $debug && debug(9,$skip[$index],$line);
+                $index = ($skip[$index] - 1);
+            }
+        }
+    }
+}
+
+sub queue_is_builtin {
+    my $queue = shift;
+
+    if (($queue eq 'trash') or ($queue eq 'repeat') or ($queue eq 'group') or ($queue eq 'group_host')) {
+        return 1;
+    }
+
+    return 0;
+}
+
+sub queues_check {
+    my $now  = shift;
+    my @time = localtime($now);
+    my $check_crons = 0;
+
+    $last_check = $now;
+
+    my $current_minute = floor($now / 60);
+
+    if ($current_minute > $last_minute) {
+        $check_crons = 1;
+        $last_minute = $current_minute;
+    }
+
+    $debug && debug(12);
+
+    foreach my $queue (keys %main) {
+
+        next if queue_is_builtin($queue);
+
+        if ($main{$queue}{'now'} || ($check_crons && cron_mask_match(\@time, $main{$queue}{'cron_mask'}))) {
+            if ($queue eq 'csv') {
+                csv_out();
+                next;
+            }
+
+            queue_mail($queue) if (!$profile);
+        }
+    }
+}
+
+sub queues_flush {
+    $debug && debug(13);
+
+    foreach my $queue (keys %main) {
+        next if queue_is_builtin($queue);
+
+        if ($queue eq 'csv') {
+            csv_out();
+            next;
+        }
+
+        queue_mail($queue) if (!$profile);
+    }
+    if ($status) { $status = 0; }
+}
+
+sub queue_mail {
+    my $queue = shift;
+    my @lines;
+
+    # evaluate threshold first to prevent report if none of the lines appeared often enough
+    if ($main{$queue}{'threshold'}) {
+        my @t = @{$main{$queue}{'threshold'}};
+
+        foreach my $hostname (keys %{$main{$queue}{'logs'}}) {
+            foreach my $key (keys %{$main{$queue}{'logs'}{$hostname}}) {
+                for (my $x = 0; $x < @t; $x += 2) {
+                    # compare count first then regex
+                    if ($main{$queue}{'logs'}{$hostname}{$key} < $t[$x+1] && $key =~ $t[$x]) {
+                        delete $main{$queue}{'logs'}{$hostname}{$key};
+                        last;
+                    }
+                }
+            }
+
+            delete $main{$queue}{'logs'}{$hostname} unless(keys %{$main{$queue}{'logs'}{$hostname}});
+        }
+
+        delete $main{$queue}{'logs'} unless(keys %{$main{$queue}{'logs'}});
+    }
+
+    return unless (keys %{$main{$queue}{'logs'}});
+    $debug && debug(11,$queue);
+
+    my $tmp = new File::Temp(UNLINK => 1, DIR => '/tmp/', SUFFIX => '.tenshi')
+        or clean_up and die RED "[ERROR] could not open temporary file: $!\n";
+    $debug && debug(19,$tmp);
+
+    if ($status and (!$main{$queue}{'pager'})) {
+        print $tmp "*** Status: $status ***\n";
+    }
+
+    foreach my $hostname (keys %{$main{$queue}{'logs'}}) {
+        my $index = 0;
+
+        next unless (keys %{$main{$queue}{'logs'}{$hostname}});
+
+        if ($resolve && !$main{$queue}{'pager'}) {
+            my $ipaddr = inet_aton($hostname);
+
+            if ($ipaddr && !defined $hostnames{$ipaddr}) {
+                $hostnames{$ipaddr} = gethostbyaddr($ipaddr, AF_INET);
+            }
+
+            if (defined $ipaddr && defined $hostnames{$ipaddr}) {
+                print $tmp "\n$hostname ($hostnames{$ipaddr}): \n";
+            } else {
+                print $tmp "\n$hostname: \n";
+            }
+        } else {
+            print $tmp "\n$hostname: \n" if (!$main{$queue}{'pager'});
+        }
+
+        my @sorted_keys;
+
+        if ($sort_order eq 'descending') {
+            @sorted_keys = reverse sort { $main{$queue}{'logs'}{$hostname}{$a} <=> $main{$queue}{'logs'}{$hostname}{$b} } keys %{$main{$queue}{'logs'}{$hostname}};
+        } elsif ($sort_order eq 'ascending') {
+            @sorted_keys = sort { $main{$queue}{'logs'}{$hostname}{$a} <=> $main{$queue}{'logs'}{$hostname}{$b} } keys %{$main{$queue}{'logs'}{$hostname}};
+        }
+
+        foreach my $key (@sorted_keys) {
+            if ($main{$queue}{'pager'}) {
+                last if ($pager_limit and ($index >= $pager_limit));
+                print $tmp "$hostname,$main{$queue}{'logs'}{$hostname}{$key},$key\n";
+                $index++;
+            } else {
+                last if ($limit and ($index >= $limit));
+                print $tmp "    $main{$queue}{'logs'}{$hostname}{$key}: $key\n";
+                $index++;
+            }
+        }
+
+        print $tmp "\n  *** Too many alerts (limit: $limit)  ***\n"
+            if ($limit and ($index >= $limit));
+
+        # clear regexp match count for every regexp whose left most queue is the one being mailed
+        for (my $index = 0; $index <= $#regexp; $index++) {
+            my @q = split(/,/, $queues[$index]);
+            $regexp_matches{$hostname}[$index] = 0 if $q[0] eq $queue;
+        }
+    }
+
+    seek($tmp, 0, 0) or clean_up and die RED "[ERROR] can't rewind $tmp->filename: $!\n";
+
+    if ($filter_file{$queue}) {
+        local $SIG{CHLD} = 'IGNORE'; # FIXME it's ugly I know, need something smarter here
+
+        $debug && debug(20,"$filter_file{$queue} $filter_args{$queue} < $tmp");
+
+        open(my $filter, "$filter_file{$queue} $filter_args{$queue} < $tmp|") or
+            clean_up and die RED "[ERROR] '$filter_file{$queue} $filter_args{$queue} < $tmp' failed: $!\n";
+
+        while (<$filter>) { push @lines, $_; }
+    } else {
+        while (<$tmp>)    { push @lines, $_; }
+    }
+
+    return unless (scalar(@lines) > 0);
+
+    my $smtp = Net::SMTP->new($mailserver, Hello => $mailhelo, Timeout => $mailtimeout, Debug => $debug_smtp);
+
+    if (!$smtp) {
+        print RED "[ERROR] could not contact $mailserver:25\n";
+        return;
+    }
+    if (!$smtp->mail($main{$queue}{'mailfrom'})) {
+        print RED "[ERROR] mail from: $main{$queue}{'mailfrom'} rejected\n";
+        return;
+    }
+    if (!$smtp->to(split(/,/, $main{$queue}{'mailto'}))) {
+        print RED "[ERROR] rcpt to: $main{$queue}{'mailto'} rejected\n";
+        return;
+    }
+    if (!$smtp->data()) {
+        print RED "[ERROR] data rejected\n";
+        return;
+    }
+
+    my $timezone = get_timezone();
+    my $subject  = $main{$queue}{'subject'} || $subject;
+
+    $smtp->datasend("From: $main{$queue}{'mailfrom'}\n");
+    $smtp->datasend("To: $main{$queue}{'mailto'}\n");
+    $smtp->datasend("Date: " . strftime("%a, %d %b %Y %H:%M:%S $timezone", localtime()) . "\n");
+    $smtp->datasend("X-tenshi-version: $version\n");
+    $smtp->datasend("X-tenshi-hostname: $our_hostname\n");
+
+    if (!$main{$queue}{'now'}) {
+        my @now = localtime();
+
+        $main{$queue}{'report_time'} = [ @startup_time ] if (!$main{$queue}{'report_time'});
+        $smtp->datasend("X-tenshi-report-start: " . strftime("%a %b %d %H:%M:%S $timezone %Y", @{$main{$queue}{'report_time'}}) . "\n");
+        $main{$queue}{'report_time'} = [ @now ];
+    }
+
+    $smtp->datasend("Subject: $subject [$queue]\n\n");
+    $smtp->datasend(@lines);
+    $smtp->dataend();
+    $smtp->quit;
+    $main{$queue}{'logs'} = {};
+}
+
+sub csv_out {
+    # FIXME: too much code duplication here, need better functions
+
+    return unless (keys %{$main{'csv'}{'logs'}});
+
+    if (!$main{'csv'}{'now'}) {
+        my @now = localtime();
+
+        $main{'csv'}{'report_time'} = [ @startup_time ] if (!$main{'csv'}{'report_time'});
+        $main{'csv'}{'report_time'} = [ @now ];
+    }
+
+    my $tmp = new File::Temp(UNLINK => 1, DIR => '/tmp/', SUFFIX => '.tenshi')
+        or clean_up and die RED "[ERROR] could not open temporary file: $!\n";
+    $debug && debug(19,$tmp);
+
+    foreach my $hostname (keys %{$main{'csv'}{'logs'}}) {
+        my $index = 0;
+
+        next unless (keys %{$main{'csv'}{'logs'}{$hostname}});
+
+        my @sorted_keys = sort { $main{'csv'}{'logs'}{$hostname}{$a} <=> $main{'csv'}{'logs'}{$hostname}{$b} } keys %{$main{'csv'}{'logs'}{$hostname}};
+
+        foreach my $key (@sorted_keys) {
+            print $tmp "$hostname,\"$key\",$main{'csv'}{'logs'}{$hostname}{$key}\n";
+            $index++;
+        }
+
+        # clear regexp match count for every regexp whose left most queue is the one being mailed
+        for (my $index = 0; $index <= $#regexp; $index++) {
+            my @q = split(/,/, $queues[$index]);
+            $regexp_matches{$hostname}[$index] = 0 if $q[0] eq 'csv';
+        }
+    }
+
+    seek($tmp, 0, 0) or clean_up and die RED "[ERROR] can't rewind $tmp->filename: $!\n";
+
+    local $SIG{CHLD} = 'IGNORE'; # FIXME it's ugly I know, need something smarter here
+
+    $debug && debug(20,"$main{'csv'}{'path'} $main{'csv'}{'args'} < $tmp");
+
+    open(my $filter, "$main{'csv'}{'path'} $main{'csv'}{'args'} < $tmp|") or
+        die RED "[ERROR] '$main{'csv'}{'path'} $main{'csv'}{'args'} < $tmp' failed: $!\n";
+
+    $main{'csv'}{'logs'} = {};
+}
+
+sub prepare_process {
+    $0 = 'tenshi';
+    chdir '/'                   or clean_up and die RED "[ERROR] can't chdir to /: $!\n";
+    $) = "$gid $gid"            or clean_up and die RED "[ERROR] can't reset supplementary groups: $!\n";
+    setgid($gid)                or clean_up and die RED "[ERROR] can't setgid to $gid: $!\n";
+    setuid($uid)                or clean_up and die RED "[ERROR] can't setuid to $uid: $!\n";
+    close STDIN                 or clean_up and die RED "[ERROR] can't close STDIN: $!\n";
+    open(STDIN, "/dev/null")    or clean_up and die RED "[ERROR] can't open STDIN as /dev/null: $!\n";
+}
+
+sub daemonize {
+    defined(my $pid = fork)     or clean_up and die RED "[ERROR] can't fork: $!\n";
+    exit if $pid;
+    setsid()                    or clean_up and die RED "[ERROR] can't start a new session: $!\n";
+}
+
+sub save_pid {
+    open (PIDFILE,">$pid_file") or clean_up and die RED "[ERROR] could not open pid file $pid_file: $!\n";
+    print PIDFILE $$; $debug && debug(4,$$);
+    close PIDFILE;
+    $saved_pid = 1;
+}
+
+sub clean_up {
+    my $save = $!; # preserve $! for the call to die
+    local $SIG{CHLD} = 'IGNORE';
+    unlink $pid_file if $saved_pid;
+
+    if (scalar(@tail_pids) > 0) {
+      $debug && debug(21, join(' ', @tail_pids));
+      kill("SIGTERM", @tail_pids);
+    }
+
+    foreach my $fh (@fhs) {
+        close $fh;
+        if ($listen and $fh == $syslog_listen_socket) {
+            $syslog_listen_socket->close();
+        }
+    }
+
+    $redis->quit if (defined $redis);
+
+    $! = $save;
+    return 1;
+}
+
+sub get_timezone {
+    use Time::Local;
+
+    my @time = localtime();
+    my $timediff = (timegm(@time) - timelocal(@time));
+    return sprintf("%+03d%02d", $timediff/3600 , $timediff%3600/60);
+}
+
+sub cron_field_resolve {
+    my $field       = lc(shift);
+    my $strings_ref = shift;
+
+    if (ref($strings_ref) && $strings_ref->{$field}) {
+        return $strings_ref->{$field};
+    }
+    else {
+        return $field;
+    }
+}
+
+sub cron_spec_to_mask {
+    my $string = shift;
+    my @mask;
+
+    for (my $i = 0; $i < scalar(@cron_specs); $i++) {
+        $string =~ s/^(\S+)\s*//o
+            or clean_up and die RED "[ERROR] unable to parse cron string: $string\n";
+
+        my $cron_spec = $cron_specs[$i];
+
+        my @mask_fields;
+        $#mask_fields = $cron_spec->{'max'} + $cron_spec->{'shift'};
+        @mask_fields  = map { 0 } @mask_fields;
+
+        foreach my $field (split(/,/, $1)) {
+            my $start = 0;
+            my $end   = 0;
+            my $skip  = 1;
+            if ($field =~ /\*(?:\/([0-9]+))?/o) {
+                $start = $cron_spec->{'min'};
+                $end   = $cron_spec->{'max'};
+                if ($1) { $skip = $1 }
+            }
+            else {
+
+                if (!($field =~ /(\w+)(?:-(\w+)(?:\/([0-9]+))?)?/o)) {
+                    clean_up and die RED "[ERROR] error in field syntax: $field\n";
+                }
+
+                if ($#- == 1) {
+                    $start = cron_field_resolve($1, $cron_spec->{'strings'});
+                    $end   = cron_field_resolve($1, $cron_spec->{'strings'});
+                }
+                elsif ($#- == 2) {
+                    $start = cron_field_resolve($1, $cron_spec->{'strings'});
+                    $end   = cron_field_resolve($2, $cron_spec->{'strings'});
+                }
+                elsif ($#- == 3) {
+                    $start = cron_field_resolve($1, $cron_spec->{'strings'});
+                    $end   = cron_field_resolve($2, $cron_spec->{'strings'});
+                    $skip  = $3;
+                }
+
+                if ($start > $end) {
+                    clean_up and die RED "[ERROR] error in field syntax. Ranges should be <lower>-<higher>: $field\n"
+                }
+            }
+
+            if ($start < $cron_spec->{'min'}) {
+                clean_up and die RED "[ERROR] $start is below minimum value for field in: $field\n";
+            }
+
+            if ($end > $cron_spec->{'max'}) {
+                clean_up and die RED "[ERROR] $end is above maximum value for field in: $field\n";
+            }
+
+            if ($cron_spec->{'shift'}) {
+                $start += $cron_spec->{'shift'};
+                $end   += $cron_spec->{'shift'};
+            }
+
+            for (my $j = $start; $j <= $end; $j += $skip) {
+                if (($j == $end) && $cron_spec->{'wrap'} && ($j == $cron_spec->{'max'})) {
+                    $mask_fields[$cron_spec->{'min'}] = 1;
+                    last;
+                }
+                $mask_fields[$j] = 1;
+            }
+
+            $mask[$i] = \@mask_fields;
+        }
+    }
+
+    return \@mask;
+}
+
+sub cron_mask_match {
+    my @time = @{shift()};
+    my @mask = @{shift()};
+
+    $debug && debug(15, join(' - ', map { join(',', @{$_}) } @mask), join(',', @time));
+
+    for (my $i = 0; $i < scalar(@mask); $i++) {
+        if (!$mask[$i]->[$time[$cron_specs[$i]->{'localtime_field'}]]) {
+            $debug && debug(16);
+            return 0;
+        }
+    }
+
+    $debug && debug(17);
+    return 1;
+}
+
+sub debug {
+    if (!defined($_[1])) { $_[1] = 'foo'; }
+    if (!defined($_[2])) { $_[2] = 'foo'; }
+
+    my (%debug_msg);
+
+    $debug_msg{'0'}{'msg'}  = "[CONF]  reading config file $_[1]\n";
+    $debug_msg{'0'}{'col'}  = CYAN;
+
+    $debug_msg{'1'}{'msg'}  = "[CONF]  parsing conf directive - $_[1]\n";
+    $debug_msg{'1'}{'col'}  = CYAN;
+
+    $debug_msg{'2'}{'msg'}  = "[CONF]  configuration file $_[1] successfully parsed\n";
+    $debug_msg{'2'}{'col'}  = WHITE;
+
+    $debug_msg{'3'}{'msg'}  = "[INIT]  entering monitoring loop\n";
+    $debug_msg{'3'}{'col'}  = BLUE;
+
+    $debug_msg{'4'}{'msg'}  = "[INIT]  saving pid $$ in $pid_file\n";
+    $debug_msg{'4'}{'col'}  = MAGENTA;
+
+    $debug_msg{'5'}{'msg'}  = "[MAIN]  trapped $_[1] signal!\n";
+    $debug_msg{'5'}{'col'}  = RED;
+
+    $debug_msg{'6'}{'msg'}  = "[MAIN]  got message: $_[1]\n";
+    $debug_msg{'6'}{'col'}  = WHITE;
+
+    $debug_msg{'7'}{'msg'}  = "[MAIN]  matched message for queue $_[1]: $_[2]\n";
+    $debug_msg{'7'}{'col'}  = GREEN;
+
+    $debug_msg{'8'}{'msg'}  = "[MAIN]  masked message: $_[1]\n";
+    $debug_msg{'8'}{'col'}  = RED;
+
+    $debug_msg{'9'}{'msg'}  = "[MAIN]  skipping to regex: $_[1] after failed match for group regex on line: $_[2]\n";
+    $debug_msg{'9'}{'col'}  = YELLOW;
+
+    $debug_msg{'11'}{'msg'} = "[QUEUE] flushing queue $_[1]\n";
+    $debug_msg{'11'}{'col'} = RED;
+
+    $debug_msg{'12'}{'msg'} = "[QUEUE] checking queues\n";
+    $debug_msg{'12'}{'col'} = CYAN;
+
+    $debug_msg{'13'}{'msg'} = "[QUEUE] flushing all queues\n";
+    $debug_msg{'13'}{'col'} = RED;
+
+    $debug_msg{'14'}{'msg'} = "[CRON]  creating cron mask from: $_[1]\n";
+    $debug_msg{'14'}{'col'} = GREEN;
+
+    $debug_msg{'15'}{'msg'} = "[CRON]  testing mask: $_[1] against current time: $_[2]\n";
+    $debug_msg{'15'}{'col'} = GREEN;
+
+    $debug_msg{'16'}{'msg'} = "[CRON]  test returned negative\n";
+    $debug_msg{'16'}{'col'} = GREEN;
+
+    $debug_msg{'17'}{'msg'} = "[CRON]  test returned positive\n";
+    $debug_msg{'17'}{'col'} = GREEN;
+
+    $debug_msg{'18'}{'msg'} = "[REGEX] set regex: $_[1] to: $_[2]\n";
+    $debug_msg{'18'}{'col'} = YELLOW;
+
+    $debug_msg{'19'}{'msg'} = "[FILE]  opening $_[1]\n";
+    $debug_msg{'19'}{'col'} = BLUE;
+
+    $debug_msg{'20'}{'msg'} = "[EXEC]  executing $_[1]\n";
+    $debug_msg{'20'}{'col'} = CYAN;
+
+    $debug_msg{'21'}{'msg'} = "[EXEC]  killing child processes [pids: $_[1]]\n";
+    $debug_msg{'21'}{'col'} = CYAN;
+
+    $debug_msg{'22'}{'msg'} = "[REGEX] repeat queue matched without capturing number of lines repeated; skipping\n";
+    $debug_msg{'22'}{'col'} = RED;
+
+    $debug_msg{'23'}{'msg'} = "[REDIS] $_[1]\n";
+    $debug_msg{'23'}{'col'} = RED;
+
+    $debug_msg{'100'}{'msg'} = "[ERROR] tried to change a protected setting: $_[1], please restart tenshi for this change to take effect\n";
+    $debug_msg{'100'}{'col'} = RED;
+
+    print $debug_msg{$_[0]}{'col'}, $debug_msg{$_[0]}{'msg'}, RESET;
+}
+
+sub usage {
+   die "tenshi $version      http://dev.inversepath.com/tenshi || <tenshi\@inversepath.com>
+Copyright 2004-2014                Andrea Barisani || <andrea\@inversepath.com>\n
+Usage: $0 [-c <conf file>] [-C|-f|-p] [-d <debug level>] [-P <pid file>]
+   -c configuration file
+   -C test configuration syntax
+   -d debug level
+   -f foreground mode
+   -p profile mode
+   -P pid file
+   -h this help\n\n";
+}
+
+# vim: set ts=4 sw=4 expandtab:

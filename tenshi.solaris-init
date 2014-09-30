@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# tenshi startup script
+#
+# Author: Marc Doumayrou
+# Tested on Solaris 8
+#
+
+tenshiconf=/usr/local/etc/tenshi.conf
+
+[ -f /usr/local/bin/tenshi  ] || exit 0
+
+# See how we were called.
+
+case "$1" in
+   start)
+         # Start daemons.
+                 # check if tenshi is running or not
+                 if [ -r /var/run/tenshi.pid ] ; then
+                         echo "There are one or more tenshi instances running, please stop them manually";
+                 else
+                         echo "Starting tenshi using $tenshiconf "
+                         /usr/local/bin/tenshi -c $tenshiconf
+                         sleep 2
+                         echo "forked at Pid `cat /var/run/tenshi.pid`"
+                         echo "done." ;
+                 fi
+         ;;
+   stop)
+         # Stop daemons.
+         # checking if thereis pid available
+         [ -f /var/run/tenshi.pid ] || exit 0
+
+         echo  "Shutting down tenshi... "
+         kill `cat /var/run/tenshi.pid`
+         echo "done."
+         ;;
+   restart)
+         $0 stop
+         $0 start
+         ;;
+   status)
+        if [ -r /var/run/tenshi.pid ] ; then
+                 echo "tenshi is currently forked at Pid `cat /var/run/tenshi.pid`"
+         else
+                 echo "tenshi is not running!" ;
+         fi
+         ;;
+   *)
+         echo "Usage: $0 {start|stop|restart|status}"
+         exit 1
+esac
+
+exit 0

@@ -1,0 +1,111 @@
+#!/bin/sh
+#
+# /etc/init.d/tenshi
+#   and its symbolic link
+# /(usr/)sbin/rctenshi
+#
+### BEGIN INIT INFO
+# Provides:          tenshi
+# Required-Start:    $ALL
+# Should-Start:
+# Required-Stop:     $ALL
+# Should-Stop:
+# Default-Start:     3 5
+# Default-Stop:      0 1 2 6
+# Short-Description: start tenshi log file analysis
+# Description:       "$ALL" says tenshi will start as last and end as first service
+### END INIT INFO
+#
+# Note on runlevels:
+# 0 - halt/poweroff 			6 - reboot
+# 1 - single user			2 - multiuser without network exported
+# 3 - multiuser w/ network (text mode)  5 - multiuser w/ network and X11 (xdm)
+#
+
+TENSHI_BIN=/usr/sbin/tenshi
+test -x $TENSHI_BIN || { echo "$TENSHI_BIN not installed";
+	if [ "$1" = "stop" ]; then exit 0;
+	else exit 5; fi; }
+
+TENSHI_CONFIG=/etc/sysconfig/tenshi
+test -r $TENSHI_CONFIG || { echo "$TENSHI_CONFIG not existing";
+	if [ "$1" = "stop" ]; then exit 0;
+	else exit 6; fi; }
+
+. $TENSHI_CONFIG
+
+TENSHI_PIDFILE=/var/run/tenshi/tenshi.pid
+test -d /var/run/tenshi/ && /bin/chown root:tenshi /var/run/tenshi/
+
+
+. /etc/rc.status
+
+# Reset status of this service
+rc_reset
+
+
+case "$1" in
+    start)
+	if [ -r $TENSHI_PIDFILE ]
+	then
+	  echo
+	  echo "  Service 'tenshi' seems to be running"
+	  echo "  Check the status or restart the service"
+	  echo
+	  exit 255
+	fi
+	echo -n "Starting tenshi "
+	## Start daemon with startproc(8). If this fails
+	## the return value is set appropriately by startproc.
+	/sbin/startproc /usr/sbin/tenshi
+
+	# Remember status and be verbose
+	rc_status -v
+	;;
+    stop)
+	echo -n "Shutting down tenshi "
+	## Stop daemon with killproc(8) and if this fails
+	## killproc sets the return value according to LSB.
+
+	# tenshi is running as daemon and doesn't show full path
+	/sbin/killproc tenshi
+
+	# Remember status and be verbose
+	rc_status -v
+	;;
+    restart)
+	## Stop the service and regardless of whether it was
+	## running or not, start it again.
+	$0 stop
+	sleep 2
+	$0 start
+
+	# Remember status and be quiet
+	rc_status
+	;;
+    status)
+	echo -n "Checking for service tenshi "
+	## Check status with checkproc(8), if process is running
+	## checkproc will return with exit status 0.
+
+	# Return value is slightly different for the status command:
+	# 0 - service up and running
+	# 1 - service dead, but /var/run/  pid  file exists
+	# 2 - service dead, but /var/lock/ lock file exists
+	# 3 - service not running (unused)
+	# 4 - service status unknown :-(
+	# 5--199 reserved (5--99 LSB, 100--149 distro, 150--199 appl.)
+
+	# NOTE: checkproc returns LSB compliant status values.
+	# tenshi is running as daemon and doesn't show full path
+	/sbin/checkproc tenshi
+	# NOTE: rc_status knows that we called this init script with
+	# "status" option and adapts its messages accordingly.
+	rc_status -v
+	;;
+    *)
+	echo "Usage: $0 {start|status|stop|restart}"
+	exit 1
+	;;
+esac
+rc_exit
