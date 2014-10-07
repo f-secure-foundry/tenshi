@@ -29,7 +29,7 @@ Group:             System Environment/Daemons
 License:           ISC-style
 Url:               http://www.inversepath.com/tenshi.html
 Source0:           %{name}-%{version}.tar.gz
-Requires:          perl
+Requires:          perl perl(Redis) perl(IO::BufferedSelect) perl(PerlIO::via::Timeout) perl(IO::Socket::Timeout) perl(Try::Tiny)
 Buildroot:         %{_tmppath}/%{name}-buildroot
 
 #--------------------------------------------------------------------------------
