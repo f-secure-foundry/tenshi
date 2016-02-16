@@ -74,7 +74,7 @@ $debug      = (defined($opts{'d'}) && $opts{'d'} == 0) ? 1 : $opts{'d'} || 0;
 $debug_smtp = ($debug > 1) ? 1 : 0;
 
 my $tail_file = '/usr/bin/tail';
-my $tail_args = '-q --follow=name --retry -n 0';
+my $tail_args = '-q -F -n 0';
 my $tail_multiple = 'off';
 my @tail_pids;
 
