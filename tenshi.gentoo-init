@@ -1,4 +1,4 @@
-#!/sbin/runscript
+#!/sbin/openrc-run
 
 extra_commands="checkconfig"
 extra_started_commands="reload flush"
