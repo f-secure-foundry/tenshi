@@ -1,41 +1,60 @@
 #!/sbin/openrc-run
 
+# These are custom variables.
+TENSHI_CFG="/etc/tenshi/tenshi.conf"
+TENSHI_PIDDIR="/run/tenshi"
+
+# And these all belong to OpenRC.
+command="/usr/sbin/tenshi"
 extra_commands="checkconfig"
 extra_started_commands="reload flush"
+pidfile="${TENSHI_PIDDIR}/tenshi.pid"
+command_args="-c ${TENSHI_CFG} -P ${pidfile}"
+description="tenshi log monitoring daemon"
 
 depend() {
-	need clock hostname logger
+    use logger
 }
 
 checkconfig() {
-	/usr/sbin/tenshi -C -c /etc/tenshi/tenshi.conf
-	return $?
+    $command $command_args -C
+    return $?
 }
 
-start() {
-	ebegin "Starting tenshi"
-	start-stop-daemon --start --quiet --pidfile /var/lib/tenshi/tenshi.pid --exec /usr/sbin/tenshi -- -c /etc/tenshi/tenshi.conf -P /var/lib/tenshi/tenshi.pid
-	eend $?
+start_pre() {
+    # Ensure that the pidfile directory is writable by the tenshi
+    # user/group (as defined by default in the config file).
+    checkpath --directory --mode 0700 --owner tenshi:tenshi "${TENSHI_PIDDIR}"
+
+    # If this isn't a restart, make sure that the user's config isn't
+    # busted before we try to start the daemon (this will produce
+    # better error messages than if we just try to start it blindly).
+    #
+    # If, on the other hand, this *is* a restart, then the stop_pre
+    # action will have ensured that the config is usable and we don't
+    # need to do that again.
+    if [ "${RC_CMD}" != "restart" ] ; then
+        checkconfig || return $?
+    fi
 }
 
-stop() {
-	ebegin "Stopping tenshi"
-	start-stop-daemon --stop --quiet --pidfile /var/lib/tenshi/tenshi.pid
-	eend $?
+stop_pre() {
+    # If this is a restart, check to make sure the user's config
+    # isn't busted before we stop the running daemon.
+    if [ "${RC_CMD}" = "restart" ] ; then
+        checkconfig || return $?
+    fi
 }
 
 reload() {
-	if checkconfig; then
-		ebegin "Reloading configuration and flushing all queues"
-		kill -HUP `cat /var/lib/tenshi/tenshi.pid` &>/dev/null
-		eend $?
-	else
-		eerror "tenshi config file has syntax error, not restarting"
-	fi
+    checkconfig || return $?
+    ebegin "Reloading ${description}"
+    start-stop-daemon --signal HUP --pidfile "${pidfile}"
+    eend $?
 }
 
 flush() {
-	ebegin "Flushing all queues"
-	kill -USR2 `cat /var/lib/tenshi/tenshi.pid` &>/dev/null
-	eend $?
+    ebegin "Flushing all ${description} queues"
+    start-stop-daemon --signal USR2 --pidfile "${pidfile}"
+    eend $?
 }
