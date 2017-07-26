@@ -1,3 +1,5 @@
+- rename the "gentoo" init script to "openrc"
+	Michael Orlitzky <michael@orlitzky.com>
 - throttle monitoring loop on empty reads
 - added options for listening on Redis queues (redisqueue, redisserver)
         Mark Janssen <mark@sig-io.nl>

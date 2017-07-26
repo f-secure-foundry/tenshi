@@ -13,7 +13,7 @@ Please Read The Fine Manual once through before running tenshi to make sure you
 understand whats going on and that you satisfy the REQUIREMENTS section.
 
 Copy the tenshi.<os>-init to wherever your init scripts live. Currently we only
-have init scripts for Gentoo, Debian and Solaris but we would be very happy to
+have init scripts for OpenRC (Gentoo), Debian and Solaris but we would be very happy to
 accept init scripts for other operating systems.
 
 Add tenshi to whatever run levels you need it to run in.
