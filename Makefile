@@ -10,7 +10,7 @@ mandir = /usr/share/man
 libdir = /var/lib/tenshi
 
 DOCS = README.md INSTALL CREDITS LICENSE Changelog FAQ
-SAMPLES = tenshi.conf tenshi.debian-init tenshi.gentoo-init tenshi.solaris-init tenshi.redhat-init tenshi.suse-init tenshi.redhat-spec tenshi.suse-spec
+SAMPLES = tenshi.conf tenshi.debian-init tenshi.openrc-init tenshi.solaris-init tenshi.redhat-init tenshi.suse-init tenshi.redhat-spec tenshi.suse-spec
 BIN = Makefile tenshi
 MAN = tenshi.8
 
