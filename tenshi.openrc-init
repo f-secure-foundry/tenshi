@@ -22,10 +22,6 @@ checkconfig() {
 }
 
 start_pre() {
-    # Ensure that the pidfile directory is writable by the tenshi
-    # user/group (as defined by default in the config file).
-    checkpath --directory --mode 0700 --owner tenshi:tenshi "${TENSHI_PIDDIR}"
-
     # If this isn't a restart, make sure that the user's config isn't
     # busted before we try to start the daemon (this will produce
     # better error messages than if we just try to start it blindly).

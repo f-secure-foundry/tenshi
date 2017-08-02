@@ -52,7 +52,6 @@ my $last_minute    = 0;
 my $sleep          = 5;
 my $mailtimeout    = 10;
 my $select_timeout = 1;
-my $saved_pid      = 0;
 
 my $config_reinit  = 1;
 
@@ -123,6 +122,7 @@ if ($listen) {
 
 $SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; print RED "[ERROR] child died, bailing out\n"; $time_to_die = 1; };
 
+save_pid();
 prepare_process();
 
 #
@@ -258,8 +258,6 @@ if (!($debug || $profile || $foreground)) {
     daemonize();
 }
 
-save_pid();
-
 while (!$time_to_die) {
     my $now = time;
     my ($fh, $line);
@@ -306,7 +304,7 @@ while (!$time_to_die) {
     }
 
     # throttle down loop on void reads
-    unless ($line) { print("sleep\n"); sleep(1) };
+    unless ($line) { sleep(1) };
 }
 
 queues_flush();
@@ -1031,13 +1029,11 @@ sub save_pid {
     open (PIDFILE,">$pid_file") or clean_up and die RED "[ERROR] could not open pid file $pid_file: $!\n";
     print PIDFILE $$; $debug && debug(4,$$);
     close PIDFILE;
-    $saved_pid = 1;
 }
 
 sub clean_up {
     my $save = $!; # preserve $! for the call to die
     local $SIG{CHLD} = 'IGNORE';
-    unlink $pid_file if $saved_pid;
 
     if (scalar(@tail_pids) > 0) {
       $debug && debug(21, join(' ', @tail_pids));

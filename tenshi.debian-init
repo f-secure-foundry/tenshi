@@ -10,17 +10,17 @@ case "$1" in
 	;;
   stop)
 	echo -n "Stopping log monitor: tenshi"
-	start-stop-daemon --stop --quiet --pidfile /var/run/tenshi/tenshi.pid
+	start-stop-daemon --stop --quiet --remove-pidfile --pidfile /var/run/tenshi.pid
 	echo "."
 	;;
   reload)
 	echo -n "Reloading log monitor: tenshi"
-	kill -HUP `cat /var/lib/tenshi/tenshi.pid` &>/dev/null
+	kill -HUP `cat /var/run/tenshi.pid` &>/dev/null
 	echo "."
 	;;
   restart)
 	echo -n "Stopping log monitor: tenshi"
-	start-stop-daemon --stop --quiet --pidfile /var/run/tenshi/tenshi.pid
+	start-stop-daemon --stop --quiet --remove-pidfile --pidfile /var/run/tenshi.pid
 	echo "."
 	sleep 1
 	echo -n "Starting log monitor: tenshi"
