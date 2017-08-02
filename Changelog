@@ -1,3 +1,5 @@
+- pid file is now created before dropping privileges (CVE-2017-11746)
+- remove old redhat, solaris and suse init scripts
 - rewrite and simplify the OpenRC init script
 - rename the "gentoo" init script to "openrc"
 	Michael Orlitzky <michael@orlitzky.com>
