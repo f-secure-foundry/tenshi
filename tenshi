@@ -122,9 +122,6 @@ if ($listen) {
 
 $SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; print RED "[ERROR] child died, bailing out\n"; $time_to_die = 1; };
 
-save_pid();
-prepare_process();
-
 #
 # sanity checks
 #
@@ -1023,6 +1020,8 @@ sub daemonize {
     defined(my $pid = fork)     or clean_up and die RED "[ERROR] can't fork: $!\n";
     exit if $pid;
     setsid()                    or clean_up and die RED "[ERROR] can't start a new session: $!\n";
+    save_pid();
+    prepare_process();
 }
 
 sub save_pid {
