@@ -1,14 +1,13 @@
 #!/sbin/openrc-run
 
-# These are custom variables.
+# This is a custom variable.
 TENSHI_CFG="/etc/tenshi/tenshi.conf"
-TENSHI_PIDDIR="/run/tenshi"
 
 # And these all belong to OpenRC.
 command="/usr/sbin/tenshi"
 extra_commands="checkconfig"
 extra_started_commands="reload flush"
-pidfile="${TENSHI_PIDDIR}/tenshi.pid"
+pidfile="/run/tenshi.pid"
 command_args="-c ${TENSHI_CFG} -P ${pidfile}"
 description="tenshi log monitoring daemon"
 
