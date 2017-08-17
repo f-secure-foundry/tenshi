@@ -1,9 +1,7 @@
 #!/usr/bin/perl
 #
-# tenshi 0.15 2014/08/04
-# <tenshi@inversepath.com>
-#
-# Copyright 2004-2014 Andrea Barisani <andrea@inversepath.com>
+# tenshi 0.16 2017/08/17
+# Copyright 2004-2017 Andrea Barisani <andrea@inversepath.com>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -33,7 +31,7 @@ setlocale(LC_TIME, "C");
 File::Temp->safe_level(File::Temp::HIGH);
 $Term::ANSIColor::AUTORESET = 1;
 
-my $version = '0.15';
+my $version = '0.16';
 
 my %opts;
 GetOptions('configuration=s' => \$opts{'c'}, 'Check'      => \$opts{'C'},
@@ -1247,8 +1245,8 @@ sub debug {
 }
 
 sub usage {
-   die "tenshi $version      http://dev.inversepath.com/tenshi || <tenshi\@inversepath.com>
-Copyright 2004-2014                Andrea Barisani || <andrea\@inversepath.com>\n
+   die "tenshi $version                              https://github.com/inversepath/tenshi
+Copyright 2004-2017                Andrea Barisani || <andrea\@inversepath.com>\n
 Usage: $0 [-c <conf file>] [-C|-f|-p] [-d <debug level>] [-P <pid file>]
    -c configuration file
    -C test configuration syntax

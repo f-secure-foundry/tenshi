@@ -1,19 +1,18 @@
 tenshi
 ======
 
-tenshi 0.15 README
-Copyright 2004-2014 Andrea Barisani <andrea@inversepath.com>
+tenshi 0.16 README
+Copyright 2004-2017 Andrea Barisani <andrea@inversepath.com>
 
-
-What's tenshi?
-==============
+Introduction
+============
 
 tenshi is a log monitoring program, designed to watch one or more log files for
 lines matching user defined regular expressions and report on the matches. The
 regular expressions are assigned to queues which have an alert interval and a
 list of mail recipients.
 
-Please read the example tenshi.conf and tenshi.8 man page for usage
+Please read the example `tenshi.conf` and `tenshi.8` man page for usage
 instructions.
 
 tenshi was formerly known as wasabi. The name was changed to tenshi after we
@@ -23,11 +22,25 @@ of software.
 It should be noted that tenshi was initially a perl rewrite of Oak
 (http://www.ktools.org).
 
+Installation
+============
+
+To install tenshi, add a user and group named `tenshi`. As root:
+
+```
+$ make install
+```
+
+Please read the manual before running tenshi to make sure you understand its
+operation and that you satisfy the REQUIREMENTS section. Then edit the
+configuration file `/etc/tenshi/tenshi.conf` according to your preferences.
+
+Examples init scripts for OpenRC (Gentoo) and Debian are provided.
 
 Examples
 ========
 
-Consider the following settings in tenshi.conf:
+Consider the following settings in `tenshi.conf`:
 
 ```
 set hidepid on
@@ -98,7 +111,7 @@ Requirements
 
  * Perl.
 
- * A working 'tail' implementation, when using the logfile option.
+ * A working `tail` implementation, when using the logfile option.
 
  * The Net::SMTP perl module to mail reports, typically included in perl
    installations.
@@ -110,10 +123,9 @@ Requirements
 Any missing module can be downloaded from CPAN (http://www.cpan.org) or
 installed using the CPAN shell (`perl -e shell -MCPAN`).
 
-
 Resources
 =========
 
-The tenshi project page is http://www.inversepath.com/tenshi.html
+The tenshi repository is hosted at https://github.com/inversepath/tenshi
 
-Please report any bugs you find at <tenshi@inversepath.com>.
+Please report any bugs you find at <andrea@inversepath.com>.
