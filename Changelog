@@ -4,7 +4,7 @@
 - remove old redhat, solaris and suse init scripts
 - rewrite and simplify the OpenRC init script
 - rename the "gentoo" init script to "openrc"
-	Michael Orlitzky <michael@orlitzky.com>
+        Michael Orlitzky <michael@orlitzky.com>
 - throttle monitoring loop on empty reads
 - added options for listening on Redis queues (redisqueue, redisserver)
         Mark Janssen <mark@sig-io.nl>

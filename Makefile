@@ -9,7 +9,7 @@ docdir = /usr/share/doc/tenshi-${VERSION}
 mandir = /usr/share/man
 libdir = /var/lib/tenshi
 
-DOCS = README.md INSTALL CREDITS LICENSE Changelog FAQ
+DOCS = README.md LICENSE Changelog
 SAMPLES = tenshi.conf tenshi.debian-init tenshi.openrc-init
 BIN = Makefile tenshi
 MAN = tenshi.8
