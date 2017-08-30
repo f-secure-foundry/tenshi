@@ -120,6 +120,10 @@ if ($listen) {
 
 $SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; print RED "[ERROR] child died, bailing out\n"; $time_to_die = 1; };
 
+if (!($debug || $profile || $foreground)) {
+    daemonize();
+}
+
 #
 # sanity checks
 #
@@ -248,10 +252,6 @@ $SIG{'USR1'} = sub { $debug && debug(5,'USR1') ; $status = 'queue check'; $queue
 $SIG{'USR2'} = sub { $debug && debug(5,'USR2') ; $status = 'flushing'   ; $queue_flush_needed = 1; };
 
 my $bs = IO::BufferedSelect->new(@fhs);
-
-if (!($debug || $profile || $foreground)) {
-    daemonize();
-}
 
 while (!$time_to_die) {
     my $now = time;
