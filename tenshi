@@ -120,9 +120,7 @@ if ($listen) {
 
 $SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; print RED "[ERROR] child died, bailing out\n"; $time_to_die = 1; };
 
-if (!($debug || $profile || $foreground)) {
-    daemonize();
-}
+prepare_process();
 
 #
 # sanity checks
@@ -200,6 +198,8 @@ if ($profile) {
                 push @tail_pids, $pid;
             } else {
                 # this is child, no clean_up
+                setuid($<) or die RED "[ERROR] can't setuid to $<: $!\n";
+                setuid($uid) or die RED "[ERROR] can't setuid to $uid: $!\n";
                 open(STDOUT, ">&", $w) or die RED "[ERROR] can't re-open pipe as STDOUT: $!\n";
                 close $r;
                 open(STDERR, ">/dev/null") or die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
@@ -236,13 +236,6 @@ unless (scalar(@fhs) > 0 or scalar(@redis_queues) > 0) {
     clean_up and die RED "[ERROR] no log file has been specified\n";
 }
 
-if (!($debug or $profile or $foreground)) {
-    close STDOUT               or clean_up and die RED "[ERROR] can't close STDOUT: $!\n";
-    open(STDOUT, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDOUT as /dev/null: $!\n";
-    close STDERR               or clean_up and die RED "[ERROR] can't close STDERR: $!\n";
-    open(STDERR, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
-}
-
 $debug && debug(3);
 
 $SIG{'TERM'} = sub { $debug && debug(5,'TERM') ; $status = 'terminating'; $queue_flush_needed = 1; $time_to_die   = 1; };
@@ -252,6 +245,13 @@ $SIG{'USR1'} = sub { $debug && debug(5,'USR1') ; $status = 'queue check'; $queue
 $SIG{'USR2'} = sub { $debug && debug(5,'USR2') ; $status = 'flushing'   ; $queue_flush_needed = 1; };
 
 my $bs = IO::BufferedSelect->new(@fhs);
+
+if (!($debug || $profile || $foreground)) {
+    daemonize();
+} else { # Need to drop privs even if not daemonizing
+    setuid($<) or clean_up and die RED "[ERROR] can't setuid to $<: $!\n";
+    setuid($uid) or clean_up and die RED "[ERROR] can't setuid to $uid: $!\n";
+}
 
 while (!$time_to_die) {
     my $now = time;
@@ -1007,9 +1007,11 @@ sub csv_out {
 sub prepare_process {
     $0 = 'tenshi';
     chdir '/'                   or clean_up and die RED "[ERROR] can't chdir to /: $!\n";
-    $) = "$gid $gid"            or clean_up and die RED "[ERROR] can't reset supplementary groups: $!\n";
+    if($> == 0) { # only works when root
+        $) = "$gid $gid"; (!$!) or clean_up and die RED "[ERROR] can't reset supplementary groups: $!\n";
+    }
     setgid($gid)                or clean_up and die RED "[ERROR] can't setgid to $gid: $!\n";
-    setuid($uid)                or clean_up and die RED "[ERROR] can't setuid to $uid: $!\n";
+    $> = $uid;            (!$!) or clean_up and die RED "[ERROR] can't seteuid to $uid: $!\n";
     close STDIN                 or clean_up and die RED "[ERROR] can't close STDIN: $!\n";
     open(STDIN, "/dev/null")    or clean_up and die RED "[ERROR] can't open STDIN as /dev/null: $!\n";
 }
@@ -1018,8 +1020,14 @@ sub daemonize {
     defined(my $pid = fork)     or clean_up and die RED "[ERROR] can't fork: $!\n";
     exit if $pid;
     setsid()                    or clean_up and die RED "[ERROR] can't start a new session: $!\n";
+    setuid($<)                  or clean_up and die RED "[ERROR] can't setuid to $<: $!\n";
     save_pid();
-    prepare_process();
+    setuid($uid)                or clean_up and die RED "[ERROR] can't setuid to $uid: $!\n";
+
+    close STDOUT               or clean_up and die RED "[ERROR] can't close STDOUT: $!\n";
+    open(STDOUT, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDOUT as /dev/null: $!\n";
+    close STDERR               or clean_up and die RED "[ERROR] can't close STDERR: $!\n";
+    open(STDERR, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
 }
 
 sub save_pid {
