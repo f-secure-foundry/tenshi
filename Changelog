@@ -1,3 +1,6 @@
+- improve logic for dropping privileges to ensure coverage for tail process
+        Brian De Wolf <bldewolf@csupomona.edu>
+
 0.16                                                    (20170817)
 
 - pid file is now created before dropping privileges (CVE-2017-11746)
