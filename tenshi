@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# tenshi 0.16 2017/08/17
+# tenshi 0.17 2017/10/19
 # Copyright 2004-2017 Andrea Barisani <andrea@inversepath.com>
 #
 # Permission to use, copy, modify, and distribute this software for any
@@ -31,7 +31,7 @@ setlocale(LC_TIME, "C");
 File::Temp->safe_level(File::Temp::HIGH);
 $Term::ANSIColor::AUTORESET = 1;
 
-my $version = '0.16';
+my $version = '0.17';
 
 my %opts;
 GetOptions('configuration=s' => \$opts{'c'}, 'Check'      => \$opts{'C'},
