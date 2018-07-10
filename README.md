@@ -2,7 +2,7 @@ tenshi
 ======
 
 tenshi 0.17 README
-Copyright 2004-2017 Andrea Barisani <andrea@inversepath.com>
+Copyright (c) Andrea Barisani <andrea@inversepath.com>
 
 Introduction
 ============
