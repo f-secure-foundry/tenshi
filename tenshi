@@ -1007,6 +1007,7 @@ sub csv_out {
 sub prepare_process {
     $0 = 'tenshi';
     chdir '/'                   or clean_up and die RED "[ERROR] can't chdir to /: $!\n";
+    undef $!;
     if($> == 0) { # only works when root
         $) = "$gid $gid"; (!$!) or clean_up and die RED "[ERROR] can't reset supplementary groups: $!\n";
     }
