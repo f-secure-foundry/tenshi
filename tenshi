@@ -70,6 +70,7 @@ my ($debug, $debug_smtp);
 $debug      = (defined($opts{'d'}) && $opts{'d'} == 0) ? 1 : $opts{'d'} || 0;
 $debug_smtp = ($debug > 1) ? 1 : 0;
 
+my $sendmail_bin = '/usr/sbin/sendmail';
 my $tail_file = '/usr/bin/tail';
 my $tail_args = '-q -F -n 0';
 my $tail_multiple = 'off';
@@ -395,6 +396,14 @@ sub config_read {
                 $debug && debug(1,$_);
             }
             $pid_file = $1;
+        }
+        elsif (/^set\s+sendmail_bin\s+(\S+)/) {
+            if ($config_read and ($1 ne $sendmail_bin)) {
+                clean_up and die debug(100,'sendmail');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            $sendmail_bin = $1;
         }
         elsif (/^set\s+tail\s+(\S+)\s*(\S+.*)?/) {
             if ($config_read and ($1 ne $tail_file)) {
@@ -914,10 +923,58 @@ sub queue_mail {
 
     return unless (scalar(@lines) > 0);
 
+    my $timezone = get_timezone();
+    my $subject  = $main{$queue}{'subject'} || $subject;
+
+    my $email_headers = "From: $main{$queue}{'mailfrom'}\n" .
+        "To: $main{$queue}{'mailto'}\n" .
+        "Date: " . strftime("%a, %d %b %Y %H:%M:%S $timezone", localtime()) . "\n" .
+        "X-tenshi-version: $version\n" .
+        "X-tenshi-hostname: $our_hostname\n";
+
+    if (!$main{$queue}{'now'}) {
+        my @now = localtime();
+        $main{$queue}{'report_time'} = [ @startup_time ] if (!$main{$queue}{'report_time'});
+        $email_headers .= "X-tenshi-report-start: " . strftime("%a %b %d %H:%M:%S $timezone %Y", @{$main{$queue}{'report_time'}}) . "\n";
+        $main{$queue}{'report_time'} = [ @now ];
+    }
+
+    $email_headers .= "Subject: $subject [$queue]\n\n";
+
+    # attempt sending through smtp first; try sendmail if smtp unsuccessful
     my $smtp = Net::SMTP->new($mailserver, Hello => $mailhelo, Timeout => $mailtimeout, Debug => $debug_smtp);
 
     if (!$smtp) {
         print RED "[ERROR] could not contact $mailserver:25\n";
+
+        if ( defined($sendmail_bin) ) {
+            debug(25, "Sending to sendmail queue");
+
+            my $child_pid = open( my $sendmail, "|-" );
+            if (not defined($child_pid)) {
+                debug(101, $!);
+            } elsif ($child_pid == 0) {
+                close STDERR;
+
+                if ( -x $sendmail_bin) {
+                    exec("${sendmail_bin} -f $main{$queue}{'mailfrom'} -t") or
+                        die;
+                }
+                else {
+                    debug(101, "invalid path ${sendmail_bin}");
+                }
+            }
+            elsif ($child_pid > 0) {
+                local $SIG{CHLD} = 'IGNORE';
+                print $sendmail $email_headers;
+                print $sendmail @lines;
+                close $sendmail;
+                $main{$queue}{'logs'} = {};
+            }
+
+
+        }
+
         return;
     }
     if (!$smtp->mail($main{$queue}{'mailfrom'})) {
@@ -933,24 +990,7 @@ sub queue_mail {
         return;
     }
 
-    my $timezone = get_timezone();
-    my $subject  = $main{$queue}{'subject'} || $subject;
-
-    $smtp->datasend("From: $main{$queue}{'mailfrom'}\n");
-    $smtp->datasend("To: $main{$queue}{'mailto'}\n");
-    $smtp->datasend("Date: " . strftime("%a, %d %b %Y %H:%M:%S $timezone", localtime()) . "\n");
-    $smtp->datasend("X-tenshi-version: $version\n");
-    $smtp->datasend("X-tenshi-hostname: $our_hostname\n");
-
-    if (!$main{$queue}{'now'}) {
-        my @now = localtime();
-
-        $main{$queue}{'report_time'} = [ @startup_time ] if (!$main{$queue}{'report_time'});
-        $smtp->datasend("X-tenshi-report-start: " . strftime("%a %b %d %H:%M:%S $timezone %Y", @{$main{$queue}{'report_time'}}) . "\n");
-        $main{$queue}{'report_time'} = [ @now ];
-    }
-
-    $smtp->datasend("Subject: $subject [$queue]\n\n");
+    $smtp->datasend($email_headers);
     $smtp->datasend(@lines);
     $smtp->dataend();
     $smtp->quit;
@@ -1246,8 +1286,14 @@ sub debug {
     $debug_msg{'23'}{'msg'} = "[REDIS] $_[1]\n";
     $debug_msg{'23'}{'col'} = RED;
 
+    $debug_msg{'25'}{'msg'} = "[SENDMAIL] $_[1] \n";
+    $debug_msg{'25'}{'col'} = CYAN;
+ 
     $debug_msg{'100'}{'msg'} = "[ERROR] tried to change a protected setting: $_[1], please restart tenshi for this change to take effect\n";
     $debug_msg{'100'}{'col'} = RED;
+
+    $debug_msg{'101'}{'msg'} = "[ERROR] sendmail attempt failed: $_[1]\n";
+    $debug_msg{'101'}{'col'} = RED;
 
     print $debug_msg{$_[0]}{'col'}, $debug_msg{$_[0]}{'msg'}, RESET;
 }
