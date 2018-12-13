@@ -75,8 +75,8 @@ my $tail_args = '-q -F -n 0';
 my $tail_multiple = 'off';
 my @tail_pids;
 
-
-# organize file handles by type (changes to log files in config will need to be open/closed separately) 
+# organize file handles by type (changes to log files in config will need to be
+# open/closed separately)
 my @fhs_log;
 my @fhs_fifo;
 my @fhs_syslog;
@@ -215,42 +215,41 @@ while (!$time_to_die) {
         $queue_check_needed = 1;
     }
 
-    if ($queue_flush_needed) { queues_flush();            $queue_flush_needed = 0; $queue_check_needed = 0; }
-    if ($queue_check_needed) { queues_check($now);        $queue_check_needed = 0; }
+    if ($queue_flush_needed) { queues_flush();     $queue_flush_needed = 0; $queue_check_needed = 0; }
+    if ($queue_check_needed) { queues_check($now); $queue_check_needed = 0; }
 
-    if ($config_reinit)      { 
+    if ($config_reinit) {
         my @current_log_files = @log_files;
-
-        config_read($config_file); 
-
-        # if log files change, re-create tail(s) for log files
         my $update_log_files_tail = 0;
+
+        config_read($config_file);
 
         if (scalar(@log_files) > scalar(@current_log_files) || scalar(@log_files) < scalar(@current_log_files) ) {
             $update_log_files_tail = 1;
-        }
-        else {
+        } else {
             foreach my $current_log (@current_log_files) {
                 my $current_log_exists = 0;
+
                 foreach my $log (@log_files) {
-                    if( $current_log == $log ) {
+                    if ($current_log == $log) {
                         $current_log_exists = 1;
                         last;
                     }
                 }
 
-                if( !$current_log_exists ) {
-                    $update_log_files_tail = 1; 
+                if (!$current_log_exists) {
+                    $update_log_files_tail = 1;
                     last;
                 }
             }
         }
 
         if ($update_log_files_tail) {
-            debug(24, 're-initializing tail(s)');	
+            my @old_tail_pids = @tail_pids;
+
+            debug(24, 're-initializing tail(s)');
 
             # close pipes of tail children before stopping after new tail(s) created
-            my @old_tail_pids = @tail_pids;
             @tail_pids = ();
 
             functional_sanity();
@@ -267,19 +266,17 @@ while (!$time_to_die) {
                 log_files_tail();
             }
 
-            debug(24, 'kill current/old tail(s)');	
+            debug(24, 'kill current/old tail(s)');
             kill('HUP', @old_tail_pids);
 
             undef $bs;
             $bs = IO::BufferedSelect->new( (@fhs_log, @fhs_fifo, @fhs_syslog) );
-
         }
 
-        $config_reinit      = 0;
-
+        $config_reinit = 0;
     }
 
-    if ($time_to_die)        { last; }
+    if ($time_to_die) { last; }
 
     my @ready = $bs->read_line($select_timeout);
 
@@ -1037,10 +1034,10 @@ sub daemonize {
     save_pid();
     setuid($uid)                or clean_up and die RED "[ERROR] can't setuid to $uid: $!\n";
 
-    close STDOUT               or clean_up and die RED "[ERROR] can't close STDOUT: $!\n";
-    open(STDOUT, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDOUT as /dev/null: $!\n";
-    close STDERR               or clean_up and die RED "[ERROR] can't close STDERR: $!\n";
-    open(STDERR, ">/dev/null") or clean_up and die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
+    close STDOUT                or clean_up and die RED "[ERROR] can't close STDOUT: $!\n";
+    open(STDOUT, ">/dev/null")  or clean_up and die RED "[ERROR] can't open STDOUT as /dev/null: $!\n";
+    close STDERR                or clean_up and die RED "[ERROR] can't close STDERR: $!\n";
+    open(STDERR, ">/dev/null")  or clean_up and die RED "[ERROR] can't open STDERR as /dev/null: $!\n";
 }
 
 sub save_pid {
@@ -1259,7 +1256,7 @@ sub debug {
     $debug_msg{'23'}{'msg'} = "[REDIS] $_[1]\n";
     $debug_msg{'23'}{'col'} = RED;
 
-    $debug_msg{'24'}{'msg'} = "[INIT] log files changed; $_[1]\n"; 
+    $debug_msg{'24'}{'msg'} = "[INIT] log files changed; $_[1]\n";
     $debug_msg{'24'}{'col'} = CYAN;
 
     $debug_msg{'100'}{'msg'} = "[ERROR] tried to change a protected setting: $_[1], please restart tenshi for this change to take effect\n";
@@ -1282,7 +1279,6 @@ Usage: $0 [-c <conf file>] [-C|-f|-p] [-d <debug level>] [-P <pid file>]
 }
 
 sub functional_sanity {
-
     my @readable_log_files;
 
     foreach my $log (@log_files) {
@@ -1303,11 +1299,9 @@ sub functional_sanity {
         or clean_up and die RED "[ERROR] no readable log files";
 
     @log_files = @readable_log_files;
-
 }
- 
-sub log_files_tail {
 
+sub log_files_tail {
     if (scalar(@log_files) > 0) {
         clean_up and die RED "[ERROR] $tail_file: $!\n" if (! -f $tail_file);
         my @remaining = @log_files;
@@ -1343,7 +1337,6 @@ sub log_files_tail {
             }
         } while (@remaining);
     }
-
 }
 
 # vim: set ts=4 sw=4 expandtab:
