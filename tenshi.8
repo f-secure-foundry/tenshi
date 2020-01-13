@@ -114,32 +114,17 @@ Specify the effective group ID of the process when in daemon mode.
 The file containing the PID of the process, useful for start/stop
 scripts.
 .TP
-.I set logfile <log file path>
-A log file to monitor, this may be specified multiple times to watch more than
-one log file. Depending on your tail implementation you might need to use the
-.I tail_multiple
-setting for multiple files to work. This mode can be used along with
-.I fifo
+.I set listen 0.0.0.0:514
+Enables syslog server mode. With this option tenshi will bind to the specified address:port
+pair and read messages acting like a syslog server. We always recommend to filter the port
+accordingly and possibly stunnel, or similar wrappers, to encrypt the traffic. This mode can
+be used along with
+.I logfile
 ,
-.I listen
+.I fifo
 and
 .I redisqueue
 settings.
-.TP
-.I set tail /usr/bin/tail -q --follow=name --retry -n 0
-Specify the path and arguments for the tail binary used for reading the log files. The invocation
-must be tuned against your current 'tail' implementation. Default values are configured for standard
-GNU coreutils tail. The
-.I --follow=name
-and
-.I --retry
-flags should deal properly with log rotation, if missing on your implementation we suggest that
-you use 'cp /dev/null logfile', or similar techniques, as a safe way to clear the log file upon rotation.
-.TP
-.I set tail_multiple <on|off>
-Some tail implementations do not handle more than one log file. When this option is enabled multiple
-tail commands will be forked, instead of a single command with multiple arguments. This
-option is disabled by default.
 .TP
 .I set fifo <fifo path>
 A FIFO file to monitor. This option allows you to use a syslog-ng
@@ -151,18 +136,6 @@ test your tail implementation before using this. This mode can be used along wit
 .I logfile
 ,
 .I listen
-and
-.I redisqueue
-settings.
-.TP
-.I set listen 0.0.0.0:514
-Enables syslog server mode. With this option tenshi will bind to the specified address:port
-pair and read messages acting like a syslog server. We always recommend to filter the port
-accordingly and possibly stunnel, or similar wrappers, to encrypt the traffic. This mode can
-be used along with
-.I logfile
-,
-.I fifo
 and
 .I redisqueue
 settings.
@@ -193,6 +166,33 @@ its manual for accepted values. The setting typically accepts an address:port pa
 These options are set each time the config file is read. tenshi reads its
 config file once on start-up and whenever it receives a HUP.
 
+.TP
+.I set logfile <log file path>
+A log file to monitor, this may be specified multiple times to watch more than
+one log file. Depending on your tail implementation you might need to use the
+.I tail_multiple
+setting for multiple files to work. This mode can be used along with
+.I fifo
+,
+.I listen
+and
+.I redisqueue
+settings.
+.TP
+.I set tail /usr/bin/tail -q --follow=name --retry -n 0
+Specify the path and arguments for the tail binary used for reading the log files. The invocation
+must be tuned against your current 'tail' implementation. Default values are configured for standard
+GNU coreutils tail. The
+.I --follow=name
+and
+.I --retry
+flags should deal properly with log rotation, if missing on your implementation we suggest that
+you use 'cp /dev/null logfile', or similar techniques, as a safe way to clear the log file upon rotation.
+.TP
+.I set tail_multiple <on|off>
+Some tail implementations do not handle more than one log file. When this option is enabled multiple
+tail commands will be forked, instead of a single command with multiple arguments. This
+option is disabled by default.
 .TP
 .I set sleep 5
 The loop sleep time for the notification process. The value must be \<\= 60 seconds.
@@ -579,7 +579,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .SH DISTRIBUTION
 
 The tenshi repository is hosted at
-.BI https://github.com/inversepath/tenshi
+.BI https://github.com/f-secure-foundry/tenshi
 
 .SH NOTES
 

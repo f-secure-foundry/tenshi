@@ -126,6 +126,6 @@ installed using the CPAN shell (`perl -e shell -MCPAN`).
 Resources
 =========
 
-The tenshi repository is hosted at https://github.com/inversepath/tenshi
+The tenshi repository is hosted at https://github.com/f-secure-foundry/tenshi
 
 Please report any bugs you find at <andrea@inversepath.com>.

@@ -148,7 +148,6 @@ if (!$profile) {
 
     # must at least have a log file or fifo or be a syslog listener to be functional
     functional_sanity();
-
 }
 
 #
@@ -1266,8 +1265,7 @@ sub debug {
 }
 
 sub usage {
-   die "tenshi $version                              https://github.com/inversepath/tenshi
-                                   Andrea Barisani || <andrea\@inversepath.com>\n
+   die "tenshi $version
 Usage: $0 [-c <conf file>] [-C|-f|-p] [-d <debug level>] [-P <pid file>]
    -c configuration file
    -C test configuration syntax
