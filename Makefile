@@ -33,9 +33,12 @@ ${TARBALL}:
 	rm -rf ${DIST_DIR}
 
 install:
-	install -D tenshi ${DESTDIR}${bindir}/tenshi
-	[ -f ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf ] || \
-		install -g root -m 0644 -D tenshi.conf ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf
+	mkdir -p ${DESTDIR}${bindir}
+	install tenshi ${DESTDIR}${bindir}/tenshi
+	if [ ! -f ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf ]; then \
+		mkdir -p ${DESTDIR}${sysconfdir}/tenshi && \
+		install -g root -m 0644 tenshi.conf ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf; \
+	fi
 	install -d ${DESTDIR}${docdir}
 	install -m 0644 ${DOCS} ${DESTDIR}${docdir}/
 	[ -d ${DESTDIR}${mandir}/man8 ] || \
