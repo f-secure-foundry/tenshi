@@ -37,11 +37,11 @@ install:
 	install tenshi ${DESTDIR}${bindir}/tenshi
 	if [ ! -f ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf ]; then \
 		mkdir -p ${DESTDIR}${sysconfdir}/tenshi && \
-		install -g root -m 0644 tenshi.conf ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf; \
+		install -m 0644 tenshi.conf ${DESTDIR}${sysconfdir}/tenshi/tenshi.conf; \
 	fi
 	install -d ${DESTDIR}${docdir}
 	install -m 0644 ${DOCS} ${DESTDIR}${docdir}/
 	[ -d ${DESTDIR}${mandir}/man8 ] || \
 		install -d ${DESTDIR}${mandir}/man8
-	install -g root -m 0644 tenshi.8 ${DESTDIR}${mandir}/man8/
-	install -g root -m 755 -d ${DESTDIR}${libdir}
+	install -m 0644 tenshi.8 ${DESTDIR}${mandir}/man8/
+	install -m 755 -d ${DESTDIR}${libdir}
