@@ -194,6 +194,13 @@ Some tail implementations do not handle more than one log file. When this option
 tail commands will be forked, instead of a single command with multiple arguments. This
 option is disabled by default.
 .TP
+.I set tail_missing <on|off>
+Sometimes a log file to be monitored will not exist until dynamically created by a process that
+runs after tenshi starts. If tail_missing is on, a log file that does not exist at startup will
+still be monitored rather than removed from the active log file list. Note this requires a tail
+implementation, such as the standard GNU coreutils tail, which can start monitoring log files created
+after it is run. This option is disabled by default.
+.TP
 .I set sleep 5
 The loop sleep time for the notification process. The value must be \<\= 60 seconds.
 .TP
