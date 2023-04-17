@@ -219,31 +219,11 @@ while (!$time_to_die) {
 
     if ($config_reinit) {
         my @current_log_files = @log_files;
-        my $update_log_files_tail = 0;
 
         config_read($config_file);
 
-        if (scalar(@log_files) > scalar(@current_log_files) || scalar(@log_files) < scalar(@current_log_files) ) {
-            $update_log_files_tail = 1;
-        } else {
-            foreach my $current_log (@current_log_files) {
-                my $current_log_exists = 0;
-
-                foreach my $log (@log_files) {
-                    if ($current_log == $log) {
-                        $current_log_exists = 1;
-                        last;
-                    }
-                }
-
-                if (!$current_log_exists) {
-                    $update_log_files_tail = 1;
-                    last;
-                }
-            }
-        }
-
-        if ($update_log_files_tail) {
+        if (scalar(@log_files) != scalar(@current_log_files) ||
+          join('\0', sort(@current_log_files)) ne join('\0', sort(@log_files))) {
             my @old_tail_pids = @tail_pids;
 
             debug(24, 're-initializing tail(s)');
