@@ -73,6 +73,7 @@ $debug_smtp = ($debug > 1) ? 1 : 0;
 my $tail_file = '/usr/bin/tail';
 my $tail_args = '-q -F -n 0';
 my $tail_multiple = 'off';
+my $tail_missing = 'off';
 my @tail_pids;
 
 # organize file handles by type (changes to log files in config will need to be
@@ -401,6 +402,15 @@ sub config_read {
             }
             if ($1 eq 'on') { $tail_multiple = 'on'; }
             else { $tail_multiple = 'off'; }
+        }
+        elsif (/^set\s+tail_missing\s+(off|on)/) {
+            if ($config_read and ($1 ne $tail_missing)) {
+                clean_up and die debug(100,'tail_missing');
+            } elsif (!$config_read) {
+                $debug && debug(1,$_);
+            }
+            if ($1 eq 'on') { $tail_missing = 'on'; }
+            else { $tail_missing = 'off'; }
         }
         elsif (/^set\s+uid\s+(.+)/) {
             if ($config_read and (getpwnam($1) ne $uid)) {
@@ -1257,26 +1267,30 @@ Usage: $0 [-c <conf file>] [-C|-f|-p] [-d <debug level>] [-P <pid file>]
 }
 
 sub functional_sanity {
-    my @readable_log_files;
+    my @valid_log_files;
 
     foreach my $log (@log_files) {
-        unless (-f $log) {
-            print STDERR RED "[WARNING] $log: no such file\n";
+        if (! -f $log) {
+            if ($tail_missing eq 'on') {
+                print STDERR RED "[WARNING] $log: including missing file\n";
+            }
+            else {
+                print STDERR RED "[ERROR] $log: no such file, skipping\n";
+                next;
+            }
+        }
+        elsif (! -r $log) {
+            print STDERR RED "[WARNING] $log: file not readable, skipping\n";
             next;
         }
 
-        unless (-r $log) {
-            print STDERR RED "[WARNING] $log: file not readable\n";
-            next;
-        }
-
-        push @readable_log_files, $log;
+        push @valid_log_files, $log;
     }
 
-    @readable_log_files > 0 || @fifo_files > 0 || @redis_queues > 0 || $listen
-        or clean_up and die RED "[ERROR] no readable log files";
+    @valid_log_files > 0 || @fifo_files > 0 || @redis_queues > 0 || $listen
+        or clean_up and die RED "[ERROR] no valid log files";
 
-    @log_files = @readable_log_files;
+    @log_files = @valid_log_files;
 }
 
 sub log_files_tail {
