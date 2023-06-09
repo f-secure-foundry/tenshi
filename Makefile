@@ -1,7 +1,7 @@
 # Noddy Makefile for dist
 # $Id$
 
-VERSION = 0.17
+VERSION = 0.18
 
 bindir = /usr/sbin
 sysconfdir = /etc

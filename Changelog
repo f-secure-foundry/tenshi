@@ -1,4 +1,7 @@
-- make `logfile` a dynamic option
+0.18                                                    (20230609)
+
+- add tail_missing option to monitor log files which do not exist yet
+- make logfile a dynamic option
 
 0.17                                                    (20171019)
 

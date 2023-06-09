@@ -1,7 +1,7 @@
 tenshi
 ======
 
-tenshi 0.17 README
+tenshi 0.18 README
 Copyright (c) Andrea Barisani <andrea@inversepath.com>
 
 Introduction
