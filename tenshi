@@ -123,7 +123,7 @@ if ($listen) {
     push @fhs_syslog, $syslog_listen_socket;
 }
 
-$SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; if (!scalar(@tail_pids)) { print RED "[ERROR] child(s) died, bailing out\n"; $time_to_die = 1 }  };
+$SIG{'CHLD'} = sub { $debug && debug(5,'CHLD') ; 1 while waitpid(-1, POSIX::WNOHANG) > 0; if (!scalar(@tail_pids)) { print RED "[ERROR] child(s) died, bailing out\n"; $time_to_die = 1 }  };
 
 prepare_process();
 
@@ -236,12 +236,13 @@ while (!$time_to_die) {
 
             # start new tail(s)
             if (!$profile) {
-                debug(24, 'start ' . scalar(@fhs_log) . ' new tail(s)');
+                debug(24, 'start new tail(s)');
 
                 # close pipes of current log files children before stopping associated tails
                 foreach (@fhs_log) {
                     close($_);
                 }
+                @fhs_log = ();
 
                 log_files_tail();
             }
