@@ -229,7 +229,9 @@ The mask for strings enclosed by the grouping operators ( ). See the
 section. 'set mask' on its own will set the mask to an empty string.
 .TP
 .I set mailserver localhost
-The mail server to be contacted for sending out reports.
+.I set mailserver smtp.example.com localhost
+The mail servers to be contacted for sending out reports separated by whitespace.
+Each mail server is tried in order until one succeeds or all fail.
 .TP
 .I set mailtimeout 10
 The timeout in seconds for mail server reply.
