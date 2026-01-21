@@ -53,7 +53,7 @@ my $select_timeout = 1;
 
 my $config_reinit  = 1;
 
-my ($mailserver, $mailhelo, $limit, $pager_limit, $hidepid, $status, $listen, $resolve);
+my (@mailservers, $mailhelo, $limit, $pager_limit, $hidepid, $status, $listen, $resolve);
 my (%main, %last_match, %last_queue, %filter_file, %filter_args, %hostnames, %regexp_matches);
 my ($config_read, $queue_flush_needed, $queue_check_needed, $time_to_die);
 my (@log_files, @fifo_files, @log_prefix, @regexp, @queues, @skip, @group_stack, @queues_escalation);
@@ -449,7 +449,7 @@ sub config_read {
         }
         elsif (/^set\s+limit\s+(\d+)/)             { $limit           = $1; $debug && debug(1,$_); next; }
         elsif (/^set\s+subject\s+(.+)/)            { $subject         = $1; $debug && debug(1,$_); next; }
-        elsif (/^set\s+mailserver\s+(.+)/)         { $mailserver      = $1; $debug && debug(1,$_); next; }
+        elsif (/^set\s+mailserver\s+(.+)/)         { @mailservers     = split(/\s+/, $1); $debug && debug(1,$_); next; }
         elsif (/^set\s+mailhelo\s+(.+)/)           { $mailhelo        = $1; $debug && debug(1,$_); next; }
         elsif (/^set\s+pager_limit\s+(\d+)/)       { $pager_limit     = $1; $debug && debug(1,$_); next; }
         elsif (/^set\s+mailtimeout\s+(\d+)/)       { $mailtimeout     = $1; $debug && debug(1,$_); next; }
@@ -617,7 +617,7 @@ sub config_read {
 
     close $CONF;
 
-    clean_up and die RED "[ERROR] no smtp server specified" if (!$mailserver);
+    clean_up and die RED "[ERROR] no smtp server specified" if (@mailservers == 0);
 
     $debug && debug(2,$config_file);
 
@@ -912,47 +912,50 @@ sub queue_mail {
 
     return unless (scalar(@lines) > 0);
 
-    my $smtp = Net::SMTP->new($mailserver, Hello => $mailhelo, Timeout => $mailtimeout, Debug => $debug_smtp);
+    foreach my $mailserver (@mailservers) {
+        my $smtp = Net::SMTP->new($mailserver, Hello => $mailhelo, Timeout => $mailtimeout, Debug => $debug_smtp);
 
-    if (!$smtp) {
-        print RED "[ERROR] could not contact $mailserver:25\n";
-        return;
+        if (!$smtp) {
+            print RED "[ERROR] could not contact $mailserver:25\n";
+            next;
+        }
+        if (!$smtp->mail($main{$queue}{'mailfrom'})) {
+            print RED "[ERROR] mail from: $main{$queue}{'mailfrom'} rejected\n";
+            next;
+        }
+        if (!$smtp->to(split(/,/, $main{$queue}{'mailto'}))) {
+            print RED "[ERROR] rcpt to: $main{$queue}{'mailto'} rejected\n";
+            next;
+        }
+        if (!$smtp->data()) {
+            print RED "[ERROR] data rejected\n";
+            next;
+        }
+
+        my $timezone = get_timezone();
+        my $subject  = $main{$queue}{'subject'} || $subject;
+
+        $smtp->datasend("From: $main{$queue}{'mailfrom'}\n");
+        $smtp->datasend("To: $main{$queue}{'mailto'}\n");
+        $smtp->datasend("Date: " . strftime("%a, %d %b %Y %H:%M:%S $timezone", localtime()) . "\n");
+        $smtp->datasend("X-tenshi-version: $version\n");
+        $smtp->datasend("X-tenshi-hostname: $our_hostname\n");
+
+        if (!$main{$queue}{'now'}) {
+            my @now = localtime();
+
+            $main{$queue}{'report_time'} = [ @startup_time ] if (!$main{$queue}{'report_time'});
+            $smtp->datasend("X-tenshi-report-start: " . strftime("%a %b %d %H:%M:%S $timezone %Y", @{$main{$queue}{'report_time'}}) . "\n");
+            $main{$queue}{'report_time'} = [ @now ];
+        }
+
+        $smtp->datasend("Subject: $subject [$queue]\n\n");
+        $smtp->datasend(@lines);
+        $smtp->dataend();
+        $smtp->quit;
+        $main{$queue}{'logs'} = {};
+        last;
     }
-    if (!$smtp->mail($main{$queue}{'mailfrom'})) {
-        print RED "[ERROR] mail from: $main{$queue}{'mailfrom'} rejected\n";
-        return;
-    }
-    if (!$smtp->to(split(/,/, $main{$queue}{'mailto'}))) {
-        print RED "[ERROR] rcpt to: $main{$queue}{'mailto'} rejected\n";
-        return;
-    }
-    if (!$smtp->data()) {
-        print RED "[ERROR] data rejected\n";
-        return;
-    }
-
-    my $timezone = get_timezone();
-    my $subject  = $main{$queue}{'subject'} || $subject;
-
-    $smtp->datasend("From: $main{$queue}{'mailfrom'}\n");
-    $smtp->datasend("To: $main{$queue}{'mailto'}\n");
-    $smtp->datasend("Date: " . strftime("%a, %d %b %Y %H:%M:%S $timezone", localtime()) . "\n");
-    $smtp->datasend("X-tenshi-version: $version\n");
-    $smtp->datasend("X-tenshi-hostname: $our_hostname\n");
-
-    if (!$main{$queue}{'now'}) {
-        my @now = localtime();
-
-        $main{$queue}{'report_time'} = [ @startup_time ] if (!$main{$queue}{'report_time'});
-        $smtp->datasend("X-tenshi-report-start: " . strftime("%a %b %d %H:%M:%S $timezone %Y", @{$main{$queue}{'report_time'}}) . "\n");
-        $main{$queue}{'report_time'} = [ @now ];
-    }
-
-    $smtp->datasend("Subject: $subject [$queue]\n\n");
-    $smtp->datasend(@lines);
-    $smtp->dataend();
-    $smtp->quit;
-    $main{$queue}{'logs'} = {};
 }
 
 sub csv_out {
