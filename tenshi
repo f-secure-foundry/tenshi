@@ -460,7 +460,7 @@ sub config_read {
             $debug && debug(1,$_); next;
         }
         elsif (/^set\s+sleep\s+(\d+)/)      {
-            if ($sleep > 60) { clean_up and die RED "[ERROR] sleep time should be <= 60 seconds\n"; } else {
+            if ($1 > 60) { clean_up and die RED "[ERROR] sleep time should be <= 60 seconds\n"; } else {
                 $sleep = $1; $debug && debug(1,$_); next;
             }
         }
@@ -633,6 +633,7 @@ sub parse_line {
 
     if (defined $line) {
 
+        # no enclosing loop here: next unwinds to the caller's loop
         if ($time_to_die) { next; }
 
         my $hostname;
