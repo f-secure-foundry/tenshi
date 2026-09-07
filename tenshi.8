@@ -36,7 +36,7 @@ and all messages are condensed when possible.
 
 The program reads a configuration file
 .RI ( tenshi.conf )
-and then forks a deamon for monitoring the specified log files.
+and then forks a daemon for monitoring the specified log files.
 
 .SH OPTIONS
 .SS
@@ -62,7 +62,7 @@ Enable profiling mode. In this mode the main process remains in the foreground
 and expects log lines to be fed to standard in. When it receives an EOF it will
 stop processing. No alerts will be sent in this mode, it is used solely for
 measuring tenshi's line processing speed. For example:
-time $(cat /var/log/messages|tenshi -p > /dev/null)
+time $(cat /var/log/messages|tenshi \-p > /dev/null)
 .TP
 .I -P <pid file>
 Define the file containing the PID of the process, this overrides any 'pidfile'
@@ -202,7 +202,7 @@ implementation, such as the standard GNU coreutils tail, which can start monitor
 after it is run. This option is disabled by default.
 .TP
 .I set sleep 5
-The loop sleep time for the notification process. The value must be \<\= 60 seconds.
+The loop sleep time for the notification process. The value must be <= 60 seconds.
 .TP
 .I set limit <number of lines>
 The maximum number of messages per hostname allowed in a report, any lines
@@ -218,7 +218,7 @@ limit is applied.
 All valid syslog messages are parsed by default, while non-syslog ones are
 discarded unless the special
 .I noprefix
-queue is set. This option allows to define an additional valid prefix for watching
+queue is set. This option allows one to define an additional valid prefix for watching
 other type of logs. If the regexp is matched then the prefix is removed from
 the log and the first grouped string is used for the hostname field. This may
 be specified multiple times to watch many different non-syslog logs.
@@ -444,7 +444,7 @@ definition.
 The regexps below assume
 .I hidepid
 is turned on. If you have it turned off then you will need to add in \\[(.+)\\]
-to the regex following the progam name to get them to work.
+to the regex following the program name to get them to work.
 .br
 For example:
 mail ^sendmail: (.+): to=(.+),(.+)delay=(.+)
@@ -558,7 +558,7 @@ in perl installations.
 option.
 
 Any missing module can be downloaded from CPAN (http://www.cpan.org) or installed
-using the CPAN shell (`perl -e shell -MCPAN`).
+using the CPAN shell (`perl \-e shell \-MCPAN`).
 
 .SH BUGS
 Double quote characters present in your logs might break csv output (depending on how you pipe/process
